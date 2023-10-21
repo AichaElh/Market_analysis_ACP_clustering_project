@@ -1,0 +1,1196 @@
+---
+title: "Préparation, Nettoyage et Analyse exploratoire des données"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  html_document:
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+date: "2023-06-23"
+---
+
+![](C:\Users\aicha\Desktop\openclassroom\projet 9\projet 9\poule.png)
+
+
+L'entreprise "Poulet Mondial" est une entreprise française d’agroalimentaire qui souhaite se développer à l'international.
+
+Une entreprise française d’agroalimentaire spécialisé dans la volaille souhaite se développer à l'international.
+
+L'international, oui, mais pour l'instant, le champ des possibles est bien large : aucun pays particulier ni aucun continent n'est pour le moment choisi. Tous les pays sont envisageables !
+
+L'objectif de l'étude est de proposer une première analyse des groupements de pays que l’on peut cibler pour exporter les poulets.
+
+La première partie de notre travail a été de récolter les données nécessaires pour cette étude.
+Nous les avons ensuite nettoyés, préparés et fusionnés pour en faire une première analyse exploratoire.
+
+
+# 1 Importation des Librairies
+
+```{r,message=FALSE,warning=FALSE}
+# Pour des opérations utilitaires
+library(utils)
+
+# Pour la création de graphiques
+library(ggplot2)
+
+# Pour des fonctionnalités statistiques avancées
+library(Hmisc)
+
+# Pour la manipulation de données
+library(dplyr)
+
+# Pour la visualisation de matrices de corrélation
+library(corrplot)
+
+# Pour créer des visualisations interactives
+library(plotly)
+
+# Pour améliorer la présentation des tableaux
+library(kableExtra)
+
+```
+# 2 Importation des données
+
+Les données utilisées sont des données issues de la FAO (Food and Agriculture Organization).
+
+• Données la Population: : La population de chaque zone peut servir à évaluer la taille potentielle du marché.
+
+• Données sur l'Alimentation (Disponibilité intérieure, TDI, TAS, production, importation et exportation) : Analysez ces indicateurs pour évaluer la demande intérieure. On va Rechercher les zones où la demande est élevée mais la production locale est insuffisante pour répondre à cette demande.
+
+•	Indicateur Politique (stabilité politique)  Recherchez les zones avec une stabilité politique relativement élevée pour minimiser les risques potentiels pouvant affecter les opérations commerciales et garantir la sécurité des collaborateurs.
+
+•	Indicateurs économiques (PIB , inflation) ; les zones où le PIB est élevé indique un pouvoir d'achat potentiel plus élevé pour les consommateurs . Une inflation plus faible peut indiquer une économie stable, ce qui est généralement préférable pour le commerce international.
+
+
+En combinant ces facteurs et en les évaluant pour chaque pays potentiel, l'étude peut identifier les groupements de pays offrant le meilleur potentiel pour les exportations de poulet de "La poule qui chante".
+
+
+```{r, echo=FALSE,warning=FALSE}
+# Importation des fichiers 
+Population <- read.csv("Population_2000_2018.csv")
+Alimentation <- read.csv("DisponibiliteAlimentaire_2017.csv")
+PIB <- read.csv("PIB.csv")
+Inflation <- read.csv("Inflation.csv")
+Stabilité_politique <- read.csv("Stabilité_politique.csv")
+```
+# 3 Vérification des données 
+
+## 3.1 Dataframe Population
+
+- Nombre total de valeurs manquantes dans le dataframe "Population"
+
+```{r, echo=FALSE,warning=FALSE}
+sum(is.na(Population))
+```
+- Nombre de doublons
+
+```{r, echo=FALSE,warning=FALSE}
+num_duplicates_population <- sum(duplicated(Population))
+num_duplicates_population
+```
+
+```{r, echo=FALSE,warning=FALSE}
+# Conversion de la population qui était exprimée en milliers
+Population$Valeur <- Population$Valeur * 1000
+# Restriction aux colonnes qui nous intéresse
+Population <- Population[c('Code.zone', 'Zone', 'Année', 'Valeur')]
+# Renommer la colonne "Valeur" en "Population"
+colnames(Population)[colnames(Population) == "Valeur"] <- "Population"
+```
+- Vérification du format des colonnes dans le dataframe "Population"
+
+```{r, echo=FALSE,warning=FALSE}
+
+str(Population)
+
+```
+- Résumé statistique du dataframe "Population"
+```{r, echo=FALSE,warning=FALSE}
+
+# Résumé statistique de Population
+population_summary <- summary(Population)
+
+# Utilisation de kable pour afficher le résumé statistique
+population_summary %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+
+-  Boxplot "Population"
+```{r, echo=FALSE,warning=FALSE}
+Population_2017 <- Population %>% filter(Année == 2017)
+plot_ly(data = Population_2017, y = ~Population, type = "box") %>%
+  layout(title = "Box Plot of Population (2017)",
+         yaxis = list(title = "Population "))
+```
+
+On observe 2 pays outliers qui sont l'Inde et la Chine continentale.
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec la Population la plus forte
+# Trier les données en fonction de la colonne "Population" (par ordre décroissant)
+Top_20_population <- Population_2017 %>% arrange(desc(Population)) %>% head(20)
+
+# Afficher le top 20 des pays avec la population la plus forte en 2017
+Top_20_population %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+La Chine et l'Inde ont toutes deux des populations très élevées, avec  1,42 milliard de personnes en Chine et environ 1,34 milliard de personnes en Inde. Cela indique une base de consommateurs potentielle importante pour le poulet.
+
+Cependant, nous allons attendre d'étudier d'autres facteurs par la suite pour déterminer s'il est judicieux de les garder.
+
+```{r, echo=FALSE,warning=FALSE}
+# Flop 20 des pays avec la Population la plus faible
+Population_faible_2017 <- Population_2017 %>% arrange(Population) %>% head(20)
+Population_faible_2017 %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+Certaines valeurs de population peuvent paraître basse. Cependant, après quelques vérifications, on s'aperçoit qu'elles ne sont pas erronnées.
+
+## 3.2 Dataframe Alimentation
+
+Nous avons à notre disposition un dataframe contenant des données de production, importation, exportation et variation des stocks. Nous allons utiliser ces données pour calculer de nouvelles valeurs qui seront pertinentes pour notre étude.
+
+Les nouvelles données que nous allons calculer sont les suivantes :
+
+1. "TDI" (Taux de Dépendance aux Importations %)
+
+Le TDI mesure la dépendance d'un pays par rapport aux importations.
+Il est calculé de la manière suivante :
+*TDI = (Valeur des importations / Valeur de la consommation totale) x 100*
+
+Ce ratio exprime la part des importations dans la consommation totale du pays.
+
+2. "TAS" (Taux d'Auto-Suffisance %)
+
+Le TAS mesure la capacité d'un pays à produire suffisamment de produits pour satisfaire sa propre demande interne, sans dépendre des importations. 
+Il est calculé de la manière suivante :
+*TAS = (Production nationale / Consommation totale) x 100*
+
+Un taux d'autosuffisance élevé indique une plus grande capacité du pays à répondre à sa demande interne par sa propre production.
+
+3. "Disponibilité intérieure" en milliers de tonnes
+
+*Disponibilité intérieure = Production + Importation - Exportation + Variation des stocks*
+
+### 3.2.1 Préparation du df "Alimentation"
+
+- Nombre total de valeurs manquantes dans le dataframe "Alimentation"
+
+```{r, echo=FALSE}
+sum(is.na(Alimentation))
+```
+- Nombre de doublons
+```{r, echo=FALSE}
+num_duplicates_alimentation <- sum(duplicated(Alimentation))
+num_duplicates_alimentation
+```
+
+```{r, echo=FALSE,results='hide',warning=FALSE}
+# Liste des produits
+unique_produits <- unique(Alimentation$Produit)
+unique_produits
+```
+
+```{r, echo=FALSE,warning=FALSE}
+# Filtrer les produits "Viande de Volailles"
+Alimentation <- subset(Alimentation, Produit == "Viande de Volailles")
+```
+
+```{r, echo=FALSE,results='hide',warning=FALSE}
+unique_Élément <- unique(Alimentation$Élément)
+unique_Élément
+```
+```{r, echo=FALSE,warning=FALSE}
+# Filtrer les colonnes souhaitées
+Alimentation <- subset(Alimentation, grepl("Production|Importations - Quantité|Exportations - Quantité|Variation de stock", Élément))
+```
+
+```{r, echo=FALSE,results='hide',warning=FALSE}
+unique_aunité <- unique(Alimentation$Unité)
+unique_aunité
+```
+
+```{r echo=FALSE,warning=FALSE}
+# Restriction aux colonnes qui nous intéresse
+Alimentation <- Alimentation[c('Code.zone', 'Zone','Année','Élément','Valeur')]
+```
+
+```{r,echo=FALSE, message=FALSE,results='hide',warning=FALSE}
+library(tidyr)
+# Effectuer le pivot
+Alimentation <- Alimentation %>% 
+  pivot_wider(names_from = Élément, values_from = `Valeur`)
+# Calculer les colonnes "TDI", "TAS" et "disponibilité intérieure"
+Alimentation <- Alimentation %>%
+  mutate(TDI = round((`Importations - Quantité` / (Production + `Importations - Quantité` - `Exportations - Quantité`) * 100), 2),
+         TAS = round((Production / (Production + `Importations - Quantité` - `Exportations - Quantité`)) * 100, 2),
+         `disponibilité_intérieure` = round(Production + `Importations - Quantité` - `Exportations - Quantité` + `Variation de stock`, 2))
+```
+```{r, echo=FALSE, message=FALSE,results='hide'}
+nombre_lignes <- nrow(Alimentation)
+nombre_lignes
+```
+- Vérification du format des colonnes dans le dataframe "Alimentation"
+```{r, echo=FALSE,warning=FALSE}
+str(Alimentation)
+```
+- Résumé statistique du dataframe "Alimentation"
+```{r, echo=FALSE,warning=FALSE}
+
+# Résumé statistique de Population
+Alimentation_summary <- summary(Alimentation)
+
+# Utilisation de kable pour afficher le résumé statistique
+Alimentation_summary %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+### 3.2.2 Etude de la variable "disponibilité intérieure"
+
+- Boxplot de la "disponibilité intérieure" en viande de volailles
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Tracer le box plot
+plot_ly(data = Alimentation, y = ~disponibilité_intérieure, type = "box") %>%
+  layout(title = "Box Plot de la disponibilité intérieure en viande de volailles",
+         yaxis = list(title = "disponibilité intérieure (en milliers de tonnes)"))
+```
+
+- Top 20 des pays avec la disponibilité intérieure la plus élevée
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec la disponibilité intérieure la plus élevée
+dispo_fort <- Alimentation %>% 
+  arrange(desc(disponibilité_intérieure)) %>% 
+  head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = dispo_fort, x = ~reorder(Zone, disponibilité_intérieure), y = ~disponibilité_intérieure, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "Disponibilité intérieure en milliers de tonnes"),
+         title = "Top 20 des pays avec la disponibilité intérieure la plus élevée",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+
+### 3.2.3 Etude de la variable Production
+
+- Top 20 des pays les plus producteurs
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec la Production la plus élevée
+Production_fort <- Alimentation %>% arrange(desc(Production)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = Production_fort, x = ~reorder(Zone, Production), y = ~Production, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "Production en milliers de tonnes"),
+         title = "Top 20 des pays les plus producteurs",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+### 3.2.4 Etude de la variable "TAS"
+
+- Histogramme du "TAS"
+```{r, echo=FALSE,warning=FALSE}
+# Tracer l'histogramme
+histogram <- plot_ly(data = Alimentation, x = ~TAS, type = "histogram", 
+                     marker = list(color = "blue"), opacity = 0.7) %>%
+  layout(title = "Histogramme TAS",
+         xaxis = list(title = "TAS %"),
+         yaxis = list(title = "Fréquence"))
+# Afficher l''histogramme
+histogram
+```
+- Top 20 des pays avec le TAS le plus fort
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec le TAS le plus fort
+TAS_fort <- Alimentation %>% arrange(desc(TAS)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = TAS_fort, x = ~reorder(Zone, TAS), y = ~TAS, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "TAS %"),
+         title = "Top 20 des pays avec le TAS le plus fort",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+- Flop 20 des pays avec le TAS le plus faible
+
+```{r, echo=FALSE,warning=FALSE}
+# Flop 20 des pays avec le TAS le plus faible
+TAS_faible <- Alimentation %>% arrange(TAS) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = TAS_faible, x = ~reorder(Zone, TAS), y = ~TAS, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "TAS %"),
+         title = "Top 20 des pays avec le TAS le plus faible",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+
+### 3.2.5 Etude de la variable "Importation"
+
+- Boxplot de la "importation" en viande de volailles
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Tracer le boxplot de la colonne "Importations - Quantité" du dataframe Alimentation
+plot_ly(data = Alimentation, y = ~`Importations - Quantité`, type = "box") %>%
+  layout(title = "Box Plot des Importations en viande de volailles",
+         yaxis = list(title = "Importation (en milliers de tonnes)"))
+```
+
+- Top 20 des pays qui importent le plus 
+
+```{r, echo=FALSE,warning=FALSE}
+
+# Top 20 des pays qui importent le plus 
+Importations_fort <- Alimentation %>% arrange(desc(`Importations - Quantité`)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = Importations_fort, x = ~reorder(Zone, -(`Importations - Quantité`)), y = ~(`Importations - Quantité`), type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "Importations en milliers de tonnes"),
+         title = "Top 20 des pays qui Importent le plus",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+
+### 3.2.6 Etude de la variable "TDI"
+
+- Histogramme du "TDI"
+```{r, echo=FALSE,warning=FALSE}
+# Tracer l'histogramme
+histogram <- plot_ly(data = Alimentation, x = ~TDI, type = "histogram",
+                     marker = list(color = "blue"), opacity = 0.7) %>%
+  layout(title = "Histogramme TDI",
+         xaxis = list(title = "TDI %"),
+         yaxis = list(title = "Fréquence"))
+# Afficher l''histogramme
+histogram
+```
+
+- Top 20 des pays avec le TDI le plus élevé
+
+```{r, echo=FALSE,warning=FALSE}
+
+# Top 20 des pays avec le TDI le plus élevé
+TDI_fort <- Alimentation %>% arrange(desc(TDI)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = TDI_fort, x = ~reorder(Zone, TDI), y = ~TDI, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "TDI %"),
+         title = "Top 20 des pays avec le TDI le plus fort",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+# Afficher le diagramme en barres
+barplot
+```
+
+## 3.3 Dataframe PIB
+
+PIB exprimé en $ par habitant
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Restriction aux colonnes qui nous intéresse
+PIB <- PIB[c('Code.zone..M49.', 'Zone', 'Année', 'Valeur')]
+colnames(PIB)[colnames(PIB) == "Code.zone..M49."] <- "Code.zone"
+colnames(PIB)[colnames(PIB) == "Valeur"] <- "PIB"
+PIB$PIB <- round(PIB$PIB, 2)
+```
+
+- Nombre total de valeurs manquantes dans le dataframe "PIB"
+```{r, echo=FALSE,warning=FALSE}
+sum(is.na(PIB))
+```
+- Nombre de doublons
+```{r, echo=FALSE,warning=FALSE}
+num_duplicates_PIB <- sum(duplicated(PIB))
+num_duplicates_PIB
+```
+
+- Vérification du format des colonnes dans le dataframe "PIB"
+```{r, echo=FALSE,warning=FALSE}
+str(PIB)
+```
+
+- Résumé statistique du dataframe "PIB"
+```{r, echo=FALSE,warning=FALSE}
+
+# Résumé statistique de Population
+PIB_summary <- summary(PIB)
+
+# Utilisation de kable pour afficher le résumé statistique
+PIB_summary %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+-  Boxplot du "PIB"
+```{r, echo=FALSE,warning=FALSE}
+PIB_2017 <- subset(PIB, Année == 2017)
+plot_ly(data = PIB_2017, y = ~PIB, type = "box") %>%
+  layout(title = "Box Plot du PIB par habitant (Année 2017)",
+         yaxis = list(title = "PIB $ par habitant "))
+```
+
+- Top 20 des pays avec le PIB le plus élevé
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec le PIB le plus élevé
+PIB_fort <- PIB_2017 %>% arrange(desc(PIB)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- plot_ly(data = PIB_fort, x = ~reorder(Zone, PIB), y = ~PIB, type = "bar",
+                   marker = list(color = "steelblue")) %>%
+  layout(xaxis = list(title = "Pays"),
+         yaxis = list(title = "PIB $ par habitant"),
+         title = "Top 20 des pays avec le PIB le plus fort",
+         xaxis = list(tickangle = 45, tickfont = list(size = 10)))
+
+
+# Afficher le diagramme en barres
+barplot
+```
+
+## 3.4 Dataframe Inflation
+
+```{r,echo=FALSE, message=FALSE,warning=FALSE}
+# Restriction aux colonnes qui nous intéresse
+Inflation <- Inflation[c('Code.zone..M49.', 'Zone', 'Année','Mois', 'Valeur')]
+# L'inflation est donnée pour tous les mois de l'année > Grouper les données par Zone et Année et calculer la moyenne de la colonne "Valeur"
+grouped_inflation <- aggregate(Valeur ~ Code.zone..M49. + Année, data = Inflation, FUN = mean)
+# Fusionner
+Inflation <- merge(grouped_inflation, Inflation, by = c("Code.zone..M49.", "Année"))
+# Restriction aux colonnes qui nous intéresse
+Inflation <- Inflation[c('Code.zone..M49.', 'Zone', 'Année', 'Valeur.x')]
+# Renommer colonnes
+colnames(Inflation)[colnames(Inflation) == "Code.zone..M49."] <- "Code.zone"
+colnames(Inflation)[colnames(Inflation) == "Valeur.x"] <- "Inflation"
+# Supprimer les doublons du dataframe Inflation
+Inflation <- unique(Inflation)
+Inflation$Inflation <- round(Inflation$Inflation, 2)
+```
+- Nombre de doublons
+```{r, echo=FALSE,warning=FALSE}
+num_duplicates_Inflation <- sum(duplicated(Inflation))
+num_duplicates_Inflation
+```
+
+- Nombre total de valeurs manquantes dans le dataframe "Inflation"
+```{r, echo=FALSE,warning=FALSE}
+sum(is.na(Inflation))
+```
+- Vérification du format des colonnes dans le dataframe "Inflation"
+```{r, echo=FALSE,warning=FALSE}
+str(Inflation)
+```
+
+- Résumé statistique du dataframe "Inflation"
+```{r, echo=FALSE,warning=FALSE}
+
+# Résumé statistique de Inflation
+Inflation_summary <- summary(Inflation)
+
+# Utilisation de kable pour afficher le résumé statistique
+Inflation_summary %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+- Boxplot inflation
+```{r, echo=FALSE,warning=FALSE}
+Inflation_2017 <- subset(Inflation, Année == 2017)
+p <- ggplot(Inflation_2017, aes(x = "", y = Inflation)) +
+  geom_boxplot(fill = "blue", color = "black") +
+  labs(title = "Box Plot de l'Inflation 2017",
+       y = "Inflation %")
+ggplotly(p)
+```
+
+Nous observons 2 outliers.
+
+- Top 20 des pays avec le taux d'Inflation le plus élevé
+
+```{r, echo=FALSE,warning=FALSE}
+# Top 20 des pays avec le taux d'Inflation le plus élevé
+Inflation_fort <- Inflation_2017 %>% arrange(desc(Inflation)) %>% head(20)
+
+# Créer un diagramme en barres
+barplot <- ggplot(Inflation_fort, aes(x = reorder(Zone, Inflation), y = Inflation)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  xlab("Pays") +
+  ylab("Inflation %") +
+  ggtitle("Top 20 des pays avec le taux d'Inflation le plus fort") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plotly_plot <- ggplotly(barplot)
+
+# Afficher le diagramme en barres
+plotly_plot
+```
+
+Les outliers visualisés précédemment sont le Venezuela et le Soudan du Sud. 
+Ils ont une inflation trop importante. L'inflation peut affecter les coûts de production et les prix des produits. Nous Privilégions les zones avec une inflation relativement faible pour maintenir la rentabilité à long terme.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Filtrer les lignes correspondant aux zones souhaitées
+zones <- c("Venezuela (République bolivarienne du)","Soudan du Sud")
+Alimentation_venezuela_soudan <- Alimentation %>% filter(Zone %in% zones)
+
+tableau_venezuela_soudan <- Alimentation_venezuela_soudan %>% select(Zone,"Importations - Quantité", TDI, TAS)
+tableau_venezuela_soudan %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+De plus, le Venezuela se caractérise par une importation faible en viande de volailles, un TDI très faible 4% et un TAS de 96%. Ce n'est pas un pays intéressant pour notre marché.
+Concernant le Soudan du sud, nous n'avons pas les données "importations", "TDI" et "TAS".
+
+Nous décidons de supprimer ces 2 pays de l'étude.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Supprimer les zones spécifiées de la colonne "Zone" du dataframe Inflation
+zones_a_supprimer <- c("Venezuela (République bolivarienne du)","Soudan du Sud")
+Inflation <- Inflation %>% 
+  filter(!(Zone %in% zones_a_supprimer))
+```
+
+## 3.5 Dataframe Stabilité politique
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Restriction aux colonnes qui nous intéresse
+Stabilité_politique <- Stabilité_politique[c('Code.zone', 'Zone', 'Année','Valeur')]
+# Renommer colonnes
+colnames(Stabilité_politique)[colnames(Stabilité_politique) == "Valeur"] <- "Stabilité_politique"
+```
+
+- Nombre total de valeurs manquantes dans le dataframe "Stabilité_politique"
+```{r, echo=FALSE,warning=FALSE}
+sum(is.na(Stabilité_politique))
+```
+- Nombre de doublons
+```{r, echo=FALSE,warning=FALSE}
+num_duplicates_stabilité_politique <- sum(duplicated(Stabilité_politique))
+num_duplicates_stabilité_politique
+```
+
+- Vérification du format des colonnes dans le dataframe "Stabilité_politique"
+```{r, echo=FALSE,warning=FALSE}
+str(Stabilité_politique)
+```
+
+- Résumé statistique du dataframe "Stabilité_politique"
+```{r, echo=FALSE,warning=FALSE}
+# Résumé statistique de Stabilité_politique
+Stabilité_politique_summary <- summary(Stabilité_politique)
+
+# Utilisation de kable pour afficher le résumé statistique
+Stabilité_politique_summary %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+- Boxplot de la Stabilité politique
+```{r, echo=FALSE,warning=FALSE}
+Stabilité_politique_2017 <- subset(Stabilité_politique, Année == 2017)
+# Boxplot de la Stabilité politique en 2017
+boxplot <- plot_ly(Stabilité_politique_2017, y = ~Stabilité_politique, type = "box",
+                   marker = list(color = "blue"), color = I("black")) %>%
+  layout(title = "Box Plot de la Stabilité politique en 2017",
+         yaxis = list(title = "Stabilité politique"))
+
+boxplot
+```
+
+
+- Flop 20 des pays avec la Stabilité politique la plus faible 2017
+
+```{r, echo=FALSE}
+# Flop 20 des pays avec le Stabilité_politique le plus faible 2017
+Stabilité_politique_faible <- Stabilité_politique_2017 %>% arrange(Stabilité_politique) %>% head(20)
+
+ # Créer un diagramme en barres
+barplot <- ggplot(Stabilité_politique_faible, aes(x = reorder(Zone, Stabilité_politique), y = Stabilité_politique)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  xlab("Pays") +
+  ylab("Stabilité_politique") +
+  ggtitle("Top 20 des pays avec la Stabilité politique la plus faible 2017") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+plotly_plot <- ggplotly(barplot)
+plotly_plot
+```
+Nous observons 2 outliers qui sont "Yémen" et "Afghanistan". Nous décidons de les supprimer de l'étude.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Supprimer les zones spécifiées de la colonne "Zone" du dataframe Inflation
+zones_a_supprimer <- c("Yémen","Afghanistan")
+Stabilité_politique <- Stabilité_politique %>% 
+  filter(!(Zone %in% zones_a_supprimer))
+```
+
+# 4 Jointures et données finales
+
+## 4.1 Jointures
+
+Nous allons effectuer des jointures successives par "Zone" et par "Année" afin de rassembler toutes les données en un seul dataframe. L'objectif est de joindre les dataframes les uns aux autres et de vérifier si toutes les zones du dataframe "Alimentation" sont bien présentes dans les résultats des jointures. Si certaines zones sont manquantes, nous chercherons la raison derrière cela.
+
+<details>
+<summary>Cliquez ici pour afficher le contenu masqué</summary>
+Premièrement, nous réalisons une jointure entre les dataframes "Population" et "Alimentation" :
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+#Première jointure entre Population et Alimentation
+merged_df1 <- merge(Population, Alimentation, by = c("Code.zone", "Année"))
+
+# Renommer la colonne "Zone.x" en "Zone"
+merged_df1 <- merged_df1 %>%
+  rename(Zone = Zone.x)
+
+# Supprimer la colonne "Zone.y" du dataframe
+merged_df1 <- merged_df1 %>%
+  select(-Zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df1)
+nombre_lignes
+```
+Ensuite, nous réalisons une deuxième jointure avec le dataframe "Stabilité_politique" .
+
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Deuxième jointure avec Stabilité_politique
+merged_df2 <- merge(merged_df1, Stabilité_politique, by = c("Code.zone", "Année"))
+
+# Renommer la colonne "Zone.x" en "Zone"
+merged_df2 <- merged_df2 %>%
+  rename(Zone = Zone.x)
+
+# Supprimer la colonne "Zone.y" du dataframe
+merged_df2 <- merged_df2 %>%
+  select(-Zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df2)
+nombre_lignes
+```
+Après cette première jointure, nous constatons qu'il manque 5 pays. Nous recherchons donc la liste des pays manquants.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Recherche des "Zone" uniques dans le dataframe merged_df
+zones_merged_df1 <- unique(merged_df1$Code.zone)
+
+# Recherche des "Zone" uniques dans le dataframe Stabilité_politique
+zones_Stabilité_politique <- unique(Stabilité_politique$Code.zone)
+
+# Obtenir la liste unique des pays différents entre les deux dataframes
+pays_différents <- setdiff(zones_merged_df1, zones_Stabilité_politique)
+pays_différents
+```
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Convertir la liste de codes en un vecteur
+codes_zone_recherches <- c(153, 2, 249, 41, 70)
+
+# Créer une copie du dataframe merged_df1 pour conserver les données d'origine
+merged_df1_copy <- merged_df1
+
+# Filtrer les lignes correspondant aux codes recherchés
+zones_correspondantes <- merged_df1_copy %>%
+  filter(Code.zone %in% codes_zone_recherches) %>%
+  select(Code.zone, Zone) %>%
+  distinct()
+
+# Afficher la liste des noms de "Zone" correspondant à chaque "Code.zone" recherché
+zones_correspondantes
+```
+Les pays "Afghanistan" et "Yémen" ont été supprimés du dataframe "Stabilité_politique" en tant qu'outliers, car leur stabilité politique était trop faible pour être pertinent pour notre étude. 
+
+Cependant, nous constatons également que nous n'avons pas les données de stabilité politique pour les pays suivants : "Chine, continentale", "Nouvelle-Calédonie" et "Polynésie française".
+
+Pour continuer notre analyse, nous réalisons une jointure gauche incluant tous les pays du dataframe "Alimentation".
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Deuxième jointure avec Stabilité_politique en utilisant une jointure gauche
+merged_df2 <- merge(merged_df1, Stabilité_politique, by = c("Code.zone", "Année"), all.x = TRUE)
+
+# Renommer la colonne "Zone.x" en "Zone"
+merged_df2 <- merged_df2 %>%
+  rename(Zone = Zone.x)
+
+# Supprimer la colonne "Zone.y" du dataframe
+merged_df2 <- merged_df2 %>%
+  select(-Zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df2)
+nombre_lignes
+
+```
+Nous réalisons ensuite une troisième jointure avec le dataframe "PIB".
+Les Code.zone de PIB ne correspondent pas aux "Code.zone" utilisés dans les dataframes "Alimentation" et "Stabilité_politique", on effectue donc la jointure par "Zone".
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Troisième jointure avec PIB 
+merged_df3 <- merge(merged_df2, PIB, by = c("Zone", "Année"))
+
+# Renommer la colonne "Code.zone.x" en "Code.zone"
+merged_df3 <- merged_df3 %>%
+  rename(Code.zone = Code.zone.x)
+
+# Supprimer la colonne "Code.zone.y" du dataframe
+merged_df3 <- merged_df3 %>%
+  select(-Code.zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df3)
+nombre_lignes
+```
+Après cette jointure, nous constatons que nous avons 2 pays en moins. Nous vérifions si cela est dû à une différence de syntaxe ou à des données manquantes.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Recherche des "Zone" uniques dans le dataframe merged_df2
+zones_merged_df2 <- unique(merged_df2$Zone)
+
+# Recherche des "Zone" uniques dans le dataframe merged_df3
+zones_PIB <- unique(PIB$Zone)
+
+# Obtenir la liste unique des pays différents entre les deux dataframes
+pays_différents <- setdiff(zones_merged_df2, zones_PIB)
+pays_différents
+```
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Liste des pays à rechercher
+liste_pays <- c("Chine, Taiwan Province de", "Pays-Bas")
+
+# Recherche des pays similaires dans la colonne "Zone"
+pays_similaires <- PIB[grep(paste(liste_pays, collapse = "|"), PIB$Zone), "Zone"]
+pays_similaires
+```
+Nous constatons que le nom "Pays-Bas" n'est pas écrit de la même manière dans le dataframe "PIB" (sous le nom "Pays-Bas (Royaume des)"). Nous allons donc le remplacer par la syntaxe "Pays-Bas".
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Remplacement du nom dans la colonne "Zone"
+PIB$Zone <- gsub("Pays-Bas \\(Royaume des\\)", "Pays-Bas", PIB$Zone)
+```
+
+Nous n'avons pas les données de PIB de la "Chine, , Taiwan Province de"
+
+Après quelques recherches, nous sommes en mesure de connaître le PIB/habitant de la "Chine, , Taiwan Province de" en 2017 : 24 408$. 
+Source : DGBAS (dernière prévision du 30 novembre 2018), MOEAIC, Banque centrale de Taïwan
+Nous renseignons donc cette valeur. 
+
+Nous effectuons ensuite une nouvelle jointure gauche incluant tous les pays du dataframe précédent.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Créer la nouvelle ligne avec "Zone" = "Chine, Taiwan Province de" et "Année" = "2017"
+nouvelle_ligne <- data.frame(
+  Code.zone = " ",
+  Zone = "Chine, Taiwan Province de",
+  Année = "2017",
+  PIB = 24408
+)
+
+# Ajouter la nouvelle ligne dans le dataframe PIB
+PIB <- rbind(PIB, nouvelle_ligne)
+
+# Troisième jointure avec PIB en utilisant une jointure gauche
+merged_df3 <- merge(merged_df2, PIB, by = c("Zone", "Année"), all.x = TRUE)
+
+# Renommer la colonne "Code.zone.x" en "Code.zone"
+merged_df3 <- merged_df3 %>%
+  rename(Code.zone = Code.zone.x)
+
+# Supprimer la colonne "Code.zone.y" du dataframe
+merged_df3 <- merged_df3 %>%
+  select(-Code.zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df3)
+nombre_lignes
+```
+Nous effectuons maintenant une quatrième jointure avec le dataframe "Inflation". Comme les "Code.zone" de "Inflation" ne correspondent pas aux "Code.zone" utilisés dans les dataframes précédents, nous réalisons la jointure en utilisant la colonne "Zone" .
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Quatrième jointure avec Inflation 
+merged_df4 <- merge(merged_df3, Inflation, by = c("Zone", "Année"))
+
+# Renommer la colonne "Code.zone.x" en "Code.Zone"
+merged_df4 <- merged_df4 %>%
+  rename(Code.zone = Code.zone.x)
+
+# Supprimer la colonne "Code.zone.y" du dataframe
+merged_df4 <- merged_df4 %>%
+  select(Code.zone.y)
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df4)
+nombre_lignes
+```
+Après cette jointure, nous constatons que nous avons 8 pays en moins dans le dataframe résultant. Nous allons maintenant analyser si cela est dû à une différence de syntaxe ou à des données manquantes.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Recherche des "Zone" uniques dans le dataframe merged_df3
+zones_merged_df3 <- unique(merged_df3$Zone)
+
+# Recherche des "Zone" uniques dans le dataframe Inflation
+zones_Inflation <- unique(Inflation$Zone)
+
+# Obtenir la liste unique des pays différents entre les deux dataframes
+pays_différents <- setdiff(zones_merged_df3, zones_Inflation)
+pays_différents
+```
+Le Venezuela avait été exclu précédemment de l'étude en tant qu'outlier Inflation trop forte.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Liste des pays à rechercher
+liste_pays <- c("Chine, Taiwan Province de", "Pays-Bas","Cuba", "Guyana","République centrafricaine","République populaire démocratique de Corée","Turkménistan")
+
+# Recherche des pays similaires dans la colonne "Zone"
+pays_similaires <- Inflation[grep(paste(liste_pays, collapse = "|"), Inflation$Zone), "Zone"]
+pays_similaires
+```
+Nous constatons que les "Pays-Bas" ne sont pas écrits de la même manière dans le dataframe "Inflation" (sous le nom "Pays-Bas (Royaume des)"). Nous allons donc les remplacer par la syntaxe "Pays-Bas".
+
+Les autres pays ont des données Inflation manquantes.
+Après quelques recherches, nous sommes en mesure de connaître le taux d'Inflation de la "Chine, , Taiwan Province de" en 2017 : 0.62 %. 
+Source : DGBAS (dernière prévision du 30 novembre 2018), MOEAIC, Banque centrale de Taïwan
+Nous renseignons donc cette valeur. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Créer la nouvelle ligne avec "Zone" = "Chine, Taiwan Province de" et "Année" = "2017"
+nouvelle_ligne <- data.frame(
+  Code.zone = " ",
+  Zone = "Chine, Taiwan Province de",
+  Année = "2017",
+  Inflation = 0.62
+)
+
+# Ajouter la nouvelle ligne dans le dataframe PIB
+Inflation <- rbind(Inflation, nouvelle_ligne)
+```
+Nous n'avons pas les données Inflation des pays suivants:"Cuba" , "Guyana","République centrafricaine","République populaire démocratique de Corée","Turkménistan".
+Nous allons donc effectuer une jointure gauche incluant tous les pays de la jointure précédente pour continuer notre analyse.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Remplacement du nom dans la colonne "Zone"
+Inflation$Zone <- gsub("Pays-Bas \\(Royaume des\\)", "Pays-Bas", Inflation$Zone)
+# Troisième jointure avec PIB en utilisant une jointure gauche
+merged_df4 <- merge(merged_df3, Inflation, by = c("Zone", "Année"), all.x = TRUE)
+
+# Supprimer les zones outliers établis précédemment
+zones_a_supprimer <- c("Yémen","Afghanistan","Venezuela (République bolivarienne du)","Soudan du Sud")
+merged_df4 <- merged_df4 %>% 
+  filter(!(Zone %in% zones_a_supprimer))
+
+# Nombre de lignes résultant de la jointure
+nombre_lignes <- nrow(merged_df4)
+nombre_lignes
+```
+Une fois toutes les jointures effectuées. Nous supprimons les pays jugés outliers non intéressant à être ciblés par notre marché, nous procédons à la restriction des colonnes qui nous intéressent et nous les renommons pour obtenir un dataframe final "merged_df4".
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Restriction aux colonnes qui nous intéresse
+merged_df4 <- merged_df4[c('Zone', 'Année', 'Population', 'Inflation', 'Stabilité_politique', 'PIB', 'Production', 'Importations - Quantité', 'Exportations - Quantité', 'TAS', 'TDI', 'disponibilité_intérieure')]
+
+# Changer noms de colonnes
+colnames(merged_df4) <- gsub("Importations - Quantité", "Importations", colnames(merged_df4))
+colnames(merged_df4) <- gsub("Exportations - Quantité", "Exportations", colnames(merged_df4))
+```
+</details>
+
+Lorsque nous avions étudié la population, nous avions la Chine, continentale et l'Inde qui avait une population de loin supérieur aux autres.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# données "Chine, continentale" or "Inde"
+df_chine_inde <- merged_df4 %>% 
+  filter(Zone %in% c("Chine, continentale", "Inde"))
+
+
+df_chine_inde %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+Les données montrent que l'Inde n'importe pas de poulet et est autosuffisante, ce qui suggère une forte dépendance à la production nationale. Nous décidons de supprimer l'Inde de l'étude.
+
+Quant à la Chine, elle produit une grande quantité de poulet (18236 milliers de tonnes) et a des importations relativement élevés, ce qui indique une forte demande intérieure. Cependant, elle est autosuffisante et ne dépend pas de l'importation TDI=2.5%.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Supprimer "Inde" du dataframe merged_df
+merged_df4 <- merged_df4 %>% 
+  filter(!(Zone %in% c("Inde")))
+```  
+
+## 4.2 Nouvelle variable: disponibilité intérieure/ habitant 
+
+Nous allons utiliser ce nouveau dataframe final pour calculer la disponibilité intérieure par habitant, car cette mesure sera plus pertinente pour notre étude que la disponibilité intérieure brute. En prenant en compte la population de chaque zone, nous pourrons mieux évaluer la disponibilité réelle de poulet par personne dans chaque pays, ce qui nous permettra d'avoir des comparaisons plus significatives entre les différentes zones. 
+
+```{r,echo=FALSE,warning=FALSE}
+# Calculer la dispo intérieure kg par habitant
+merged_df4 <- merged_df4 %>%
+  mutate(dispo_poulet_kg_par_hab = round((disponibilité_intérieure * 1000000) / Population, 2))
+
+# Tracer le boxplot de la colonne "dispo_poulet_kg_par_hab" 
+plot_ly(data = merged_df4, y = ~`dispo_poulet_kg_par_hab`, type = "box") %>%
+  layout(title = "Box Plot de la disponibilité par habitant en viande de volailles",
+         yaxis = list(title = "disponibilité en viande de volailles (en kg / habitant)"))
+
+# Filtrer les données pour les 20 pays avec la disponibilité intérieure de poulet par habitant la plus élevée
+dispo_poulet_hab_fort <- merged_df4 %>% 
+  arrange(desc(dispo_poulet_kg_par_hab)) %>% 
+  head(20)
+
+# Arrondir les valeurs de disponibilité intérieure de poulet par habitant à deux décimales
+dispo_poulet_hab_fort$dispo_poulet_kg_par_hab <- round(dispo_poulet_hab_fort$dispo_poulet_kg_par_hab, digits = 2)
+
+# Classer les pays du plus au moins
+dispo_poulet_hab_fort$Zone <- reorder(dispo_poulet_hab_fort$Zone, -dispo_poulet_hab_fort$dispo_poulet_kg_par_hab)
+
+# Créer un graphique en barres interactif avec Plotly
+plot <- plot_ly(data = dispo_poulet_hab_fort, 
+                x = ~Zone, 
+                y = ~dispo_poulet_kg_par_hab, 
+                type = "bar",
+                marker = list(color = "blue"),
+                text = ~paste("Pays:", Zone, "<br>Disponibilité intérieure de poulet par habitant:", dispo_poulet_kg_par_hab, "kg"),
+                hoverinfo = "text") %>%
+  layout(title = "Top 20 des pays avec la disponibilité intérieure de poulet par habitant la plus élevée",
+         xaxis = list(title = "Pays"),
+         yaxis = list(title = "Disponibilité intérieure de poulet par habitant (kg)"))
+
+# Afficher le graphique
+plot
+```
+Si la disponibilité de poulet par habitant est élevée, cela peut indiquer une demande soutenue pour ce type de produit.
+
+## 4.3 Valeurs manquantes
+
+```{r, echo=FALSE,warning=FALSE}
+# Calculer le pourcentage de valeurs manquantes par colonne
+percentage_missing <- round(colSums(is.na(merged_df4)) / nrow(merged_df4) * 100, 2)
+# Create a data frame with column names and their corresponding percentages
+missing_data <- data.frame(Column = names(percentage_missing), Percentage = percentage_missing)
+
+# Création Barplot plotly
+barplot <- plot_ly(missing_data, x = ~Column, y = ~Percentage, type = "bar",
+                   marker = list(color = "steelblue"),
+                   yaxis = list(title = "Pourcentage"),
+                   text = ~paste("Pourcentage: ", Percentage, "%"),
+                   hovertemplate = paste(
+                     "<b>%{x}</b><br>",
+                     "%{text}<extra></extra>"
+                   )) %>%
+  layout(title = "Pourcentages de valeurs manquantes",
+         barmode = "relative",
+         showlegend = TRUE)
+
+barplot
+```
+
+Ci-dessous le tableau récapitulatif des pays ayant des données manquantes.
+
+```{r,echo=FALSE,warning=FALSE}
+# Filtrer le dataframe pour ne conserver que les lignes incomplètes (avec valeurs manquantes)
+lignes_incompletes <- merged_df4[!complete.cases(merged_df4), ]
+
+# Utilisation de kable pour afficher le résumé statistique
+lignes_incompletes %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+- Boxplot de la "importation" en viande de volailles
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+# Tracer le boxplot de la colonne "Importations - Quantité" du dataframe Alimentation
+plot_ly(data = Alimentation, y = ~`Importations - Quantité`, type = "box") %>%
+  layout(title = "Box Plot des Importations en viande de volailles",
+         yaxis = list(title = "Importation (en milliers de tonnes)"))
+```
+Parmis la liste des pays ayant des données manquantes, nous recherchons les pays qui pourraient nous intéresser pour notre marché, ceux ayant une valeur importation > q3 boxplot cad 82 milliers de tonnes.
+
+```{r, echo=FALSE,warning=FALSE}
+
+# Filtrer à nouveau le dataframe pour ne conserver que les pays où "Importations" > 82
+NA_Importations_fort <- lignes_incompletes[lignes_incompletes$Importations > 82, ]
+
+# Utilisation de kable pour afficher le résumé statistique des lignes filtrées
+NA_Importations_fort %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+
+Parmi les pays étudiés, la Chine continentale, Cuba et Haïti se démarquent comme des candidats intéressants pour notre marché en raison de leurs importations significatives de poulet. 
+
+Concernant Cuba, la disponibilité de poulet par habitant n'est pas indiquée, nous n'avons pas d'informations sur la demande potentielle.
+Haïti quand à elle présente une inflation élevée et une stabilité politique relativement faible.
+Cuba et Haïti ne sont pas intéressant pour notre étude.
+
+
+Bien que la stabilité politique ne soit pas précisée, la Chine possède l'une des économies les plus importantes et en croissance au monde. Ils importent beaucoup et La disponibilité de poulet par habitant est également élevée, indiquant que la consommation de poulet par personne est importante.
+La Chine continentale pourrait être un marché attractif pour l'exportation de poulets.
+
+Cependant, pour les analyses ultérieures que nous prévoyons de réaliser, telles que l'Analyse en Composantes Principales (ACP) ou le clustering, il est essentiel d'avoir des données complètes pour chaque pays. Par conséquent, nous avons pris la décision de supprimer les pays ayant des données manquantes.
+
+En procédant ainsi, nous nous assurons d'avoir un ensemble de données complet pour mener à bien nos prochaines étapes d'analyse et d'étude de marché.
+
+```{r,echo=FALSE,warning=FALSE}
+
+# Filtrer le dataframe pour supprimer les lignes avec des valeurs manquantes
+merged_df <- merged_df4[complete.cases(merged_df4), ]
+```
+
+## 4.4 Dictionnaire des données
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Créer un data frame avec les données
+dictionnaire <- data.frame(
+  Variable = c(
+    "Population", "Stabilité politique", "PIB", "Inflation", "Inflation décimale",
+    "Production", "Importations", "Exportations", "Variation de stock",
+    "TDI (Taux de Dépendance aux Importations %)", "TDI décimal",
+    "TAS (Taux d’Auto-Suffisance %)", "TAS décimal", "Disponibilité intérieure",
+    "Dispo_poulet_kg_par_hab"
+  ),
+  Descriptif = c(
+    "Population totale de la zone.", "Indicateur de stabilité politique.",
+    "Produit Intérieur Brut par habitant.", "Taux d'inflation.",
+    "Taux d'inflation décimal.", "Production nationale de viande de volaille.",
+    "Quantité importée de viande de volaille.", "Quantité exportée de viande de volaille.",
+    "Variation des stocks de viande de volaille.",
+    "Pourcentage de dépendance aux importations de viande de volaille.", 
+    "Taux de dépendance aux importations de viande de volaille décimal.",
+    "Pourcentage d'auto-suffisance en production de viande de volaille.",
+    "Taux d’autosuffisance en production de viande de volaille décimal.",
+    "Disponibilité intérieure.",
+    "Disponibilité intérieure de poulet par habitant, calculée en divisant la disponibilité intérieure par la population."
+  ),
+  Unité = c(
+    "Nombre de personnes", "Mesure sans unité", "Dollars par habitant", "Pourcentage",
+    "Décimal", "Milliers de tonnes", "Milliers de tonnes", "Milliers de tonnes",
+    "Milliers de tonnes", "Pourcentage", "Décimal", "Pourcentage", "Décimal",
+    "Milliers de tonnes", "Kilogrammes par habitant"
+  )
+)
+
+# Afficher le tableau
+dictionnaire %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+
+# 5 Tests de normalité et de corrélation
+
+## 5.1 Normalité
+
+```{r,echo=FALSE,warning=FALSE}
+# Conversion des colonnes en décimales
+merged_df$Inflation_decimal <- merged_df$Inflation / 100
+merged_df$TAS_decimal <- merged_df$TAS / 100
+merged_df$TDI_decimal <- merged_df$TDI / 100
+
+# Sélectionner les colonnes numériques du dataframe
+numeric_cols <- c('Population', 'Inflation_decimal', 'Stabilité_politique', 'PIB', 'Production', 'Importations', 'Exportations', 'TAS_decimal', 'TDI_decimal','dispo_poulet_kg_par_hab')
+numeric_df <- merged_df[, numeric_cols]
+
+# Test de Shapiro-Wilk 
+shapiro_test <- function(x) {
+  shapiro_result <- shapiro.test(x)
+  p_value <- shapiro_result$p.value
+  if (p_value <= 0.05) {
+    result <- "Non-normal (p-value < 0.05)"
+  } else {
+    result <- "Normal (p-value >= 0.05)"
+  }
+  return(result)
+}
+
+# Vérifier la normalité pour chaque colonne
+normality_results <- sapply(numeric_df, shapiro_test)
+
+# Afficher les résultats
+normality_results %>%
+  kbl(caption = "Résultats des Tests de normalité") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+Les variables ne suivent pas une distribution normale. Nous allons donc évaluer les relations entre les différentes variables avec le test de corrélation de Spearman.
+
+
+## 5.2 Matrice de corrélation de Spearman
+
+Pour vérifier la corrélation entre les variables, nous allons effectuer des tests de Spearman et regrouper les résultats sous forme de matrice.
+Ne sont affichés que les résultats statistiquement significatif p-value < 0.05 .
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Compute the correlation matrix using Spearman's rank correlation coefficient
+cor_matrix <- cor(numeric_df, method = "spearman", use = "pairwise.complete.obs")
+
+# Calculate the p-values for the correlation matrix
+cor_p <- rcorr(as.matrix(numeric_df), type = "spearman")$P
+
+# Filter the correlation matrix based on p-values
+filtered_cor_matrix <- cor_matrix * (cor_p < 0.05)
+
+# Set the correlation coefficient values on the cells
+cell_text <- round(filtered_cor_matrix, digits = 2)
+
+# Create a color palette for the correlation matrix
+color_palette <- colorRampPalette(c("blue", "white", "red"))(n = 100)
+
+# Plot the colored correlation matrix with coefficient values
+corrplot(filtered_cor_matrix, method = "color", type = "upper", order = "hclust",
+         col = color_palette, cl.pos = "n", tl.cex = 0.8, addCoef.col = "black",
+         p.mat = cor_p, sig.level = 0.05, insig = "blank")
+
+```
+
+
+Cette visualisation des variables fortement correlées nous indique qu’il existe une redondance dans les données.
+
+Comme par exemple:
+la stabilité politique positivement corrélée au PIB,
+La population positivement corrélée à la production ou encore la production positivement corrélée au TAS et à l'exportation.
+
+En raison donc de cette redondance, l’ACP pourra etre utilisée pour réduire d’origine en un nombre plus petit de nouvelles variables.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Sauvegarder le dataframe merged_df au format RDS
+saveRDS(merged_df, file = "C:\\Users\\aicha\\Desktop\\openclassroom\\projet 9\\ACP_clustering_project\\merged_df.rds")
+saveRDS(merged_df4, file = "C:\\Users\\aicha\\Desktop\\openclassroom\\projet 9\\ACP_clustering_project\\merged_df4.rds")
+
+#Export du dataframe pour analyse
+write.csv(merged_df,"merged_df.csv", row.names = FALSE)
+write.csv(merged_df4,"merged_df4.csv", row.names = FALSE)
+```
+
+
+
+

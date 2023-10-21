@@ -1,0 +1,1444 @@
+
+---
+title: "ACP et Clustering"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    always_allow_html: true
+  word_document:
+    toc: yes
+    toc_depth: '2'
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+date: "2023-06-23"
+---
+
+![](C:\Users\aicha\Desktop\openclassroom\projet 9\projet 9\poule.png)
+
+"Poulet Mondial" est une entreprise française d’agroalimentaire. Elle souhaite se développer à l'international.
+
+L'objectif de l'étude est de proposer une première analyse des groupements de pays que l’on peut cibler pour exporter les poulets.
+
+La première partie de notre travail a été de récolter les données nécessaires pour cette étude, de les nettoyer, préparer et en faire une première analyse exploratoire.
+
+
+La seconde partie de notre étude va consister à analyser de plus près les zones afin de définir un groupement de pays que l’on peut cibler pour exporter nos poulets. 
+
+Dans un premier temps, nous allons effectuer la standardisation des données pour rendre les variables comparables.
+Nous allons ensuite réaliser l'ACP (Analyse en Composantes Principales) pour réduire la dimension des données et visualiser les relations entre les pays.
+
+Ensuite, nous allons utiliser plusieurs méthodes de clustering, notamment la Classification Ascendante Hiérarchique (CAH), la méthode des K-means et la méthode DBScan, pour identifier des groupes ou des clusters parmi les pays. Ces méthodes nous aident à regrouper les pays ayant des caractéristiques similaires, ce qui est essentiel pour notre objectif de sélection des pays cibles pour l'exportation de poulets. 
+
+Enfin, nous allons comparer les résultats de ces méthodes de clustering afin d’avoir une liste de pays cibles pour l’ expansion internationale.
+
+# 1 Importation des Librairies
+
+```{r,message=FALSE, warning=FALSE}
+# Pour des opérations utilitaires
+library(utils)
+
+# Bibliothèques pour la manipulation de données et l'analyse statistique
+library(dplyr)
+library(tidyr)
+library(Hmisc)
+
+library(magrittr)
+
+# Bibliothèques pour la visualisation des données
+library(ggplot2)
+library(plotly)
+library(factoextra)
+library(corrplot)
+library(ggrepel)
+library(gridExtra)
+
+# Bibliothèques pour l'analyse de données multidimensionnelles et de clustering
+library(FactoMineR)
+library(cluster)
+library(dbscan)
+
+# Bibliothèque pour la personnalisation des tables
+library(kableExtra)
+
+```
+
+# 2 Importation des données et dictionnaire des données
+
+## 2.1 Importation des données
+
+Nous avons importé les données préalablement préparée dans la première partie du projet "Préparation, Nettoyage et Analyse exploratoire des données".
+
+Nous avons identifié chaque pays avec son code codes pays à 3 lettres (alpha-3) comme définis par l'ISO 3166-1.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(readODS)
+
+# Charger le dataframe merged_df à partir du fichier RDS
+merged_df <- readRDS(file = ".\merged_df.rds")
+merged_df4 <- readRDS(file = ".\merged_df4.rds")
+code_pays <- read.ods(file = ".\code_pays.ods")
+
+# Transformez la feuille sélectionnée en dataframe
+code_pays <- as.data.frame(code_pays)
+# Renommer les colonnes du dataframe code_pays
+colnames(code_pays) <- c("Zone", "Code_iso")
+
+merged_df <- merge(merged_df, code_pays, by = "Zone", all.x = TRUE)
+
+# Liste des pays avec NA dans la colonne Code_zone_iso de merged_df
+pays_avec_na <- merged_df$Zone[is.na(merged_df$Code_iso)]
+pays_avec_na
+
+```
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Sélectionner colonnes
+df <- merged_df[, c('Code_iso', 'Population', 'Stabilité_politique', 'PIB', 'Inflation_decimal','Production', 'Importations', 'Exportations','TAS_decimal', 'TDI_decimal', 'dispo_poulet_kg_par_hab')]
+
+```
+
+## 2.2 Dictionnaire des données
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Créer un data frame avec les données
+dictionnaire <- data.frame(
+  Variable = c(
+    "Population", "Stabilité politique", "PIB", "Inflation", "Inflation décimale",
+    "Production", "Importations", "Exportations", "Variation de stock",
+    "TDI (Taux de Dépendance aux Importations %)", "TDI décimal",
+    "TAS (Taux d’Auto-Suffisance %)", "TAS décimal", "Disponibilité intérieure",
+    "Dispo_poulet_kg_par_hab"
+  ),
+  Descriptif = c(
+    "Population totale de la zone.", "Indicateur de stabilité politique.",
+    "Produit Intérieur Brut par habitant.", "Taux d'inflation.",
+    "Taux d'inflation décimal.", "Production nationale de viande de volaille.",
+    "Quantité importée de viande de volaille.", "Quantité exportée de viande de volaille.",
+    "Variation des stocks de viande de volaille.",
+    "Pourcentage de dépendance aux importations de viande de volaille.", 
+    "Taux de dépendance aux importations de viande de volaille décimal.",
+    "Pourcentage d'auto-suffisance en production de viande de volaille.",
+    "Taux d’autosuffisance en production de viande de volaille décimal.",
+    "Disponibilité intérieure.",
+    "Disponibilité intérieure de poulet par habitant, calculée en divisant la disponibilité intérieure par la population."
+  ),
+  Unité = c(
+    "Nombre de personnes", "Mesure sans unité", "Dollars par habitant", "Pourcentage",
+    "Décimal", "Milliers de tonnes", "Milliers de tonnes", "Milliers de tonnes",
+    "Milliers de tonnes", "Pourcentage", "Décimal", "Pourcentage", "Décimal",
+    "Milliers de tonnes", "Kilogrammes par habitant"
+  )
+)
+
+# Afficher le tableau
+dictionnaire %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+
+
+# 3 Standardisation des données
+
+Les données présentent des échelles différentes et ne peuvent être comparables dans leur état brut. Nous allons donc utiliser la technique de standardisation pour les rendre comparables sur une échelle commune. Ceci afin que toutes les variables aient le même poids dans la construction des plans de l’ACP.
+
+Nous allons Sélectionner les variables numériques et les standardiser.
+
+Pour standardiser les colonnes du dataframe merged_df , nous allons utiliser la fonction scale() qui standardise les valeurs en soustrayant la moyenne et en divisant par l'écart type. 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Fonction pour standardiser les données
+# Sélectionner les colonnes à standardiser
+standardiser_donnees <- function(df) {
+  colonnes_a_standardiser <- c('Population', 'Stabilité_politique','PIB',"Inflation_decimal",
+                               'Production', 'Importations', 'Exportations','TAS_decimal', 'TDI_decimal', 'dispo_poulet_kg_par_hab')
+# Appliquer la normalisation aux colonnes sélectionnées
+  df[colonnes_a_standardiser] <- scale(df[colonnes_a_standardiser])
+  # Remplacer les noms de lignes actuels par la colonne "Zone"
+  rownames(df) <- df$Code_iso
+  # Supprimer la colonne "Zone" si nécessaire (facultatif)
+  df$Code_iso <- NULL
+  
+  return(df)
+}
+df <- standardiser_donnees(df)
+
+```
+
+# 4 Analyse en Composantes Principales (ACP)
+
+L'analyse en composantes principales (ACP) est une technique de réduction de dimension qui vise à transformer des variables corrélées en un nouvel ensemble de variables non corrélées appelées composantes principales. 
+Cette technique permet de visualiser et de résumer les relations complexes entre les variables dans un espace de dimension réduit.
+
+L’enjeu d’une ACP est de trouver le meilleur plan de projection ayant la plus grande inertie, c’est à dire limitant le plus la perte d’information originelle. 
+
+Nous pourrons ainsi visualiser les relations entre variables à l’aide d’un cercle de corrélation et la variabilité entre les pays.
+
+```{r,echo=FALSE,message=FALSE}
+
+# Effectuer l'ACP
+ACP <- FactoMineR::PCA(df,scale.unit=TRUE,
+                                   graph = FALSE)
+
+
+# Récupérer les coordonnées des observations dans l'espace des composantes principales
+coord_acp <- as.data.frame(ACP$ind$coord)
+
+```
+### 4.1 ACP avant suppression des outliers
+
+#### 4.1.1 Répartition du Pourcentage d'Explication par les Plans Principaux
+
+Pour sélectionner le nombre d'axes à conserver, on utilise le critère du coude, qui consiste à examiner le graphique de l'inertie expliquée en fonction du nombre d'axes. On retient les premiers axes jusqu'à observer un "décrochage" significatif dans la courbe de l'inertie expliquée. 
+
+```{r,echo=FALSE,message=FALSE}
+#Pourcentage d’explication "valeurs propres (inerties ou variances de chaque composante) en %"
+factoextra::fviz_eig(ACP,addlabels = TRUE)
+
+```
+
+Dans notre cas, nous observons que les 3 premiers axes de l'ACP traduisent 63,3 % de l'inertie totale. 
+
+#### 4.1.2 Graphiques de corrélation des variables et nuage des individus
+
+Le cercle des corrélations est un outil pratique nous permettant de visualiser l’importance de chaque variable pour chaque axe de représentation.
+
+Les principes de lecture sont les suivants :
+
+- plus une variable possède une qualité de représentation élevée dans l’ACP, plus sa flèche est longue;
+- plus deux variables sont corrélées, plus leurs flèches pointent dans la même direction (dans le cercle de corrélation, le coefficient de corrélation est symbolisé par les angles géométriques entre les flèches);
+- plus une variable est proche d’un axe principal de l’ACP, plus elle est liée à lui. Cette dernière règle permet généralement de donner un sens concret aux axes de l’ACP
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+## Fonction pour visualiser la PCA
+
+visualiser_pca <- function(ACP, axes) {
+  factoextra::fviz_pca_var(
+    ACP,
+    axes = axes,
+    col.var = "contrib",
+    gradient.cols = rainbow(3),
+    repel = TRUE,
+    legend.title = "Contribution"
+  )
+  
+  factoextra::fviz_pca_ind(
+    ACP,
+    axes = axes,
+    col.ind = 'cos2',
+    gradient.cols = rainbow(10),
+    repel = TRUE,
+    legend.title = "Cos2 for the variables",
+    ggtheme = theme_minimal()
+  )
+}
+```
+
+- Plan (1,2)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Plan (1,2)
+visualiser_pca(ACP, c(1, 2))
+```
+
+L'analyse du nuage des individus sur le plan (1,2) nous montre 2 valeurs extrêmes: USA "États-Unis d'Amérique" et BRA "Brésil".
+Ceux sont de loin les pays qui produisent et exportent le plus. 
+
+- Plan (1,3)
+
+```{r,echo=FALSE,message=FALSE}
+
+# Plan (1,3)
+visualiser_pca(ACP, c(1, 3))
+```
+
+Sur ce plan, on retrouve nos 2 outliers précédent, mais aussi la HKG "Hong-Kong". C'est un pays qui dépend fortement de l'importation, il importe beaucoup.
+
+- Plan (2,3)
+
+```{r,echo=FALSE,message=FALSE}
+# Plan (2,3)
+visualiser_pca(ACP, c(2, 3))
+
+```
+
+Sur ce 3ème plan on retrouve l'outlier "Hong-Kong". 
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Filtrer les lignes correspondant aux zones souhaitées
+zones <- c("Brésil", "États-Unis d'Amérique", "Chine - RAS de Hong-Kong")
+filtered_df <- merged_df %>% filter(Zone %in% zones)
+
+
+tableau_TDI <- filtered_df %>% select(Zone,Production, Importations,Exportations,TDI, TAS,dispo_poulet_kg_par_hab)
+tableau_TDI %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+Concernant le Brésil, c'est un pays qui importe peu, TDI est très faible et un TAS > 100%. 
+Concernant les Etats-Unis, il fait parti des pays qui importe le plus bien qu'il ne dépende pas de l'importation TDI=0.67% et il produit beaucoup et est autosuffisant.
+
+Nous décidons de les supprimer pour la suite de l'étude  en raison de leurs valeurs extrêmes tout en gardant en tête que les Etats-Unis pourrait être un pays intéressant.
+
+La "Chine - RAS de Hong-Kong". C'est un pays qui dépend fortement de l'importation, il importe beaucoup.
+Ce pays est un sérieux candidat.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Supprimer les zones spécifiées de la colonne "Zone" du dataframe df
+zones_a_supprimer <- c("BRA", "USA")
+df <- subset(df, !(rownames(df) %in% zones_a_supprimer))
+```
+Après la suppression de ces outliers, nous relançons une nouvelle ACP avec les nouvelles données.
+
+### 4.2 ACP après suppression des outliers
+
+#### 4.2.1 Répartition du Pourcentage d'Explication par les Plans Principaux
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Effectuer l'ACP
+set.seed(123)
+
+ACP <- FactoMineR::PCA(df,scale.unit=TRUE,
+                                   graph = FALSE)
+
+# Récupérer les coordonnées des observations dans l'espace des composantes principales
+coord_acp <- as.data.frame(ACP$ind$coord)
+
+#Pourcentage d’explication
+factoextra::fviz_eig(ACP,addlabels = TRUE)
+```
+
+On voit ici un décrochage au niveau des 3 premières composantes qui représentent 62.6  % de l'inertie totale .
+
+
+#### 4.2.2 Analyse des variables et des individus
+
+##### Visualisation de la qualité de la représentation des variables et de la contribution des variables aux axes
+
+```{r,echo=FALSE,message=FALSE}
+# Affichage  côte à côte
+par(mfrow = c(1, 2))
+
+res <- get_pca_var(ACP)
+corrplot(res$cos2)
+
+corrplot(res$contrib, is.corr=FALSE) 
+
+```
+
+Cela nous indique que: 
+
+- Les variables "Production","Population" et "stabilité politique sont bien représentées sur la dimension 1 et contribuent le plus.
+
+- Les variables "Exportation" et Importation" sont bien représentées sur la dimension 2 et contribuent le plus. Le "PIB" y est un peu moins bien représenté.
+
+- Les variables "dispo_par_hab" et "TDI" sont bien représentées sur la dimension 3 et contribuent le plus. 
+
+Les variables "TAS" et "Inflation" sont males représentées dans les 3 premières dimensions
+
+##### Graphiques de corrélation des variables et nuage des individus
+
+- Plan (1,2)
+
+```{r,echo=FALSE,message=FALSE}
+
+# Plan (1,2)
+visualiser_pca(ACP, c(1, 2))
+
+```
+
+Sur le plan (1,2) , on note NLD(Pays-Bas), BEL (Belgique),DEU(Allemagne),GBR (Grande-Bretagne) qui sont des pays qui importent et exportent beaucoup.
+
+RUS (Russie), IDN (Indonésie) et MEX (Mexique) pays qui produisent beaucoup et ont une forte population.
+
+La Macédoine (MAC), l'Islande ( ISL) et le Luxembourg (LUX) parmis les pays les plus stables politiquement.
+
+- Plan (1,3)
+
+```{r,echo=FALSE,message=FALSE}
+
+# Plan (1,3)
+visualiser_pca(ACP, c(1, 3))
+
+```
+
+Sur le plan (1,3) , on note HKG (Hong-Kong) en tant que pays qui dépend beaucoup de l'importation. 
+
+On voit des pays comme la RUS (Russie),IDN (Indonésie) ou PAK(PAkistan) qui ont une forte population et produisent beaucoup.
+
+La Macédoine (MAC)et le Luxembourg (LUX) parmis les pays les plus stables politiquement.
+
+Des pays avec une importante 'dispo par habitant' comme la Nouvelle-Zélande NZL, Australie AUS, Israel ISR
+
+
+- Plan (2,3)
+
+```{r,echo=FALSE,message=FALSE}
+# Plan (2,3)
+visualiser_pca(ACP, c(2, 3))
+
+```
+
+Sur le plan (2,3) , on note 3 pays qui se démarquent nettement: BEL(Belgique), NLD(Pays Bas) et HKG(Hong-Kong). Ils font partie des pays qui à la fois importent beaucoup, exportent beaucoup et ont une forte dépendance à l'importation.
+
+
+# 5 Clustering
+
+## 5.1 Classification Ascendantes hiérarchiques (CAH)
+
+La CAH est une méthode de regroupement des données qui commence par considérer chaque élément comme un cluster individuel. Ensuite, elle fusionne progressivement les clusters les plus similaires pour créer une hiérarchie de clusters, comme un arbre. Chaque fusion est représentée par une branche dans l'arbre.
+
+L’objectif est de regrouper des pays similaires sur le critère de la distance séparant chaque point.
+
+On utilise la méthode de Ward : cette méthode cherche à minimiser l’inertie intra-classe et à maximiser l’inertie inter-classe afin d’obtenir des classes les plus homogènes possibles.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Définir la graine pour la reproductibilité
+set.seed(123)
+
+# Effectuer la classification hiérarchique
+arbre <- hclust(dist(df), method = "ward.D2")
+
+# Tracer le dendrogramme
+plot(arbre)
+```
+
+En premier lieu, une analyse de la forme du dendrogramme pourra nous donner une indication sur le nombre de classes à retenir. 3 branches distinctes apparaissent sur l’arbre.
+
+
+### 5.1.1 Détermination du nombre optimal de clusters
+
+- Pour nous aider, nous pouvons représenter les sauts d’inertie du dendrogramme selon le nombre de classes retenues.
+Pour déterminer le nombre optimal de clusters, nous regardons les sauts d'inertie dans le dendrogramme. Chaque fusion dans le dendrogramme est associée à un saut d'inertie. Plus le saut est important, plus la fusion de clusters à cet endroit est significative en termes de variance. Cela signifie que le nombre optimal de clusters pourrait être associé à ce saut.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+set.seed(123)
+inertie <- sort(arbre$height, decreasing = TRUE)
+plot(inertie[1:20], type = "s", xlab = "Nombre de classes", ylab = "Inertie")
+
+```
+
+On voit un saut assez net à 3 classes.
+
+- Utilisation de la fonction best.cutree
+
+L’extension JLutils propose une fonction best.cutree qui calculera la meilleure partition en termes de perte relative d'inertie pour un nombre de clusters allant de 3 à 20 (par défaut), et renverra le nombre optimal de clusters.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+src<- source(url("https://raw.githubusercontent.com/larmarange/JLutils/master/R/clustering.R"))
+best<-best.cutree(arbre)
+best
+```
+Un découpage en 3 clusters est confirmé.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+par(mfrow = c(1, 1))
+plot(arbre, main = "Partition en 3 classes", xlab = "", ylab = "", sub = "", axes = FALSE, hang = -1, cex = 0.6, las = 2)
+rect.hclust(arbre, 3, border = "green3")
+
+```
+
+Regardons le nombre de pays que comporte chaque cluster.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Couper le dendrogramme pour obtenir 4 clusters
+clusters <- cutree(arbre, k = 3)
+
+# Créer un nouveau dataframe avec les numéros de cluster
+df_clusters <- data.frame(df, Cluster_CAH= clusters)
+
+coord_acp_clusters <- coord_acp
+coord_acp_clusters$Cluster_CAH <- clusters
+
+# Utiliser la fonction table pour compter le nombre de zones dans chaque cluster
+nombre_zones_par_cluster <- table(coord_acp_clusters$Cluster_CAH)
+
+# Afficher le nombre de zones par cluster
+nombre_zones_par_cluster %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+
+
+### 5.1.2 Indice de silhouette
+
+L’objectif du clustering est d’obtenir des clusters de bonne qualité. Le clustering est de haute qualité si la distance dans les observations (intra-cluster) d’un cluster donné est minimale et la distance séparant les clusters eux-mêmes (inter-cluster) est maximale.
+
+Le coefficient de silhouette est une mesure de la qualité d'une partition. Il évalue à quel point chaque observation est bien regroupée par rapport aux autres observations du même cluster, en prenant en compte également à quel point cette observation pourrait être mieux regroupée dans un autre cluster. 
+
+Un coefficient de silhouette proche de +1 indique une bonne séparation des clusters, tandis qu'un coefficient proche de -1 indique que l'observation serait mieux regroupée dans un autre cluster.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Calculer les scores de silhouette pour chaque observation
+silhouette_CAH <- silhouette(df_clusters$Cluster_CAH, dist(df))
+
+# Calculer les moyennes de silhouette par cluster
+silhouette_means_CAH <- aggregate(silhouette_CAH[, "sil_width"], by = list(silhouette_CAH[, "cluster"]), FUN = mean)
+
+# Calculer la moyenne générale de silhouette
+overall_mean <- mean(silhouette_CAH[, "sil_width"])
+
+# Ajouter une ligne pour la moyenne générale dans le tableau
+overall_row <- data.frame(Group.1 = "Overall", x = overall_mean)
+silhouette_means_CAH <- rbind(silhouette_means_CAH, overall_row)
+
+# Renommer les colonnes du tableau
+colnames(silhouette_means_CAH) <- c("Cluster", "Silhouette_Mean_CAH")
+
+# Arrondir les valeurs à 2 chiffres après la virgule
+silhouette_means_CAH$Silhouette_Mean_CAH <- round(silhouette_means_CAH$Silhouette_Mean_CAH, 2)
+
+# Afficher le tableau des moyennes de silhouette pour K-moyennes
+kable(silhouette_means_CAH, format = "html") %>%
+  kable_styling(bootstrap_options = "striped")
+
+```
+
+
+### 5.1.3 Projection des clusters et centroÏdes sur les plans ACP
+
+Nous allons calculer les coordonnées acp des centroïdes (moyenne) de chacun de ces groupes pour ensuite projeter nos clusters et leurs centroïdes sur les plans ACP.
+
+```{r,echo=FALSE,message=FALSE}
+
+# Calculer les centroïdes de chaque cluster sur les dimensions "Dim.1", "Dim.2" et "Dim.3"
+centroids_CAH <- aggregate(coord_acp_clusters[, c("Dim.1", "Dim.2", "Dim.3")], 
+                             by = list(coord_acp_clusters$Cluster_CAH), 
+                             FUN = mean)
+
+# Renommer les colonnes du dataframe des centroïdes
+colnames(centroids_CAH) <- c("Cluster_CAH", "Dim.1", "Dim.2", "Dim.3")
+
+```
+
+- Plan (1,2)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+# Plan (1,2)
+factoextra::fviz_pca_var(ACP,
+                                   col.var = "contrib", 
+                                   gradient.cols = rainbow(3),
+                                   repel = TRUE,
+                                   legend.title = 'Contribution')
+
+pca12_plot <- ggplot(coord_acp_clusters, aes(x = Dim.1, y = Dim.2, color = factor(Cluster_CAH))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp)), box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 1 ", y = "Dimension 2", color = "Cluster") +
+  ggtitle("Projections des clusters CAH et centroïdes  sur Plan ACP Plan Dim.1/Dim.2")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_CAH$Cluster_CAH
+pca12_plot_with_centroids <- pca12_plot +
+  geom_point(data = centroids_CAH, aes(x = Dim.1, y = Dim.2), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_CAH, aes(x = Dim.1, y = Dim.2, label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3)
+
+# Afficher le graphique
+print(pca12_plot_with_centroids)
+
+```
+
+Le cluster 1 semble être composé des pays qui importent et exportent le plus.
+
+Le cluster 2 est composés de pays plus stables politiquement.
+
+Le cluster 3 comportent des pays à forte population et production.
+
+- Plan (1,3)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Plan (1,3)
+factoextra::fviz_pca_var(ACP,
+                                   axes = c(1, 3),
+                                   col.var = "contrib",
+                                   gradient.cols = rainbow(3),
+                                   repel = TRUE,
+                                   legend.title = 'Contribution')
+
+
+pca13_plot <-ggplot(coord_acp_clusters, aes(x = Dim.1, y = Dim.3, color = factor(Cluster_CAH))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp)), box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 1 ", y = "Dimension 3", color = "Cluster") +
+  ggtitle("Projections des clusters CAH et centroïdes sur Plan ACP Dim.1/Dim.3")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_CAH$Cluster_CAH
+pca13_plot_with_centroids <- pca13_plot +
+  geom_point(data = centroids_CAH, aes(x = Dim.1, y = Dim.3), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_CAH, aes(x = Dim.1, y = Dim.3, label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3)
+
+# Afficher le graphique
+print(pca13_plot_with_centroids)
+
+```
+
+Le cluster 1 est celui qui dépend le plus des importations.
+
+Le cluster 2 est composés de pays plus stables politiquement et plus de dispo par habitant.
+
+Le cluster 3 comportent des pays à forte population et production.
+
+
+- Plan (2,3)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Plan (1,3)
+factoextra::fviz_pca_var(ACP,
+                                   axes = c(2, 3),
+                                   col.var = "contrib",
+                                   gradient.cols = rainbow(3),
+                                   repel = TRUE,
+                                   legend.title = 'Contribution')
+
+pca23_plot <- ggplot(coord_acp_clusters, aes(x = Dim.2, y = Dim.3, color = factor(Cluster_CAH))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp)), box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 2 ", y = "Dimension 3", color = "Cluster") +
+  ggtitle("Projections des clusters CAH et centroïdes sur Plan ACP Dim.2/Dim.3")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_CAH$Cluster_CAH
+pca23_plot_with_centroids <- pca23_plot +
+  geom_point(data = centroids_CAH, aes(x = Dim.2, y = Dim.3), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_CAH, aes(x = Dim.2, y = Dim.3,label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3) 
+
+# Afficher le graphique
+print(pca23_plot_with_centroids)
+```
+
+Le cluster 1 semble être composé des pays qui importent, exportent le plus et dépendent le plus de l'importation.
+
+Le cluster 2 composés de pays qui a plus de dispo par habitant.
+
+### 5.1.4 Caractérisation des clusters avec les variables initiales
+
+Nous allons caractériser chacun de ces clusters avec nos variables initiales.
+
+```{r,echo=FALSE,message=FALSE, warning=FALSE}
+
+# Créer une liste de variables pour lesquelles vous souhaitez générer des boxplots
+variables <- c("Population", "Stabilité_politique", "PIB", "Inflation_decimal",
+               "Production",'TAS_decimal',"Importations", 'TDI_decimal', "Exportations", 'dispo_poulet_kg_par_hab')
+
+# Fonction pour générer un graphique boxplot
+generate_boxplot <- function(variable) {
+  ggplot(df_clusters, aes(x = Cluster_CAH, y = !!sym(variable), fill = factor(Cluster_CAH))) +
+    geom_boxplot(show.legend = FALSE) +
+    labs(x = "Cluster CAH", y = variable) +
+    ggtitle(paste("Distribution de", variable)) +
+    theme_minimal()
+}
+
+# Créer une liste pour stocker les paires de graphiques
+pair_list <- list()
+
+# Générer les paires de graphiques
+for (i in seq(1, length(variables), by = 2)) {
+  pair <- variables[i:min(i + 1, length(variables))]
+  plot1 <- generate_boxplot(pair[1])
+  plot2 <- generate_boxplot(pair[2])
+  pair_list[[length(pair_list) + 1]] <- grid.arrange(plot1, plot2, ncol = 2)
+}
+
+invisible(
+  lapply(pair_list, function(pair) {
+    print(pair)
+  })
+)
+```
+Cluster 1: Pays riches et stables politiquement qui importent beaucoup
+
+- Population Fort
+- Stabilité politique Forte
+- PIB Fort
+- Inflation Faible
+- Production Fort
+- TAS Moyen
+- Importations Fort 
+- TDI Fort
+- Exportations Fort
+- Disponibilité de poulet Moyen
+
+
+Cluster 2: Consommation de poulet forte mais Faibles importations
+
+- Population Faible
+- Stabilité politique Fort
+- PIB Moyen
+- Inflation Faible
+- Production Faible
+- TAS Faible
+- Importations Faible
+- TDI Moyen
+- Exportations Faible
+- Disponibilité de poulet Fort
+
+Cluster 3: Pays en difficulté économique et politique
+
+- Population Moyen
+- Stabilité politique Faible
+- PIB Faible
+- Inflation Fort
+- Production Moyen
+- TAS Fort
+- Importations Faible
+- TDI Faible
+- Exportations Faible
+- Disponibilité de poulet Faible
+
+Dans l'ensemble, le Cluster 1 semble présenter un environnement économique et politique favorable à l'exportation en raison de sa stabilité politique, de son PIB élevé, de ses faibles niveaux d'inflation et de ses fortes importations et exportations. Bien que la disponibilité de poulet soit classée comme "moyenne", elle peut toujours indiquer un marché potentiel.
+
+### 5.1.5 Liste des pays du cluster ciblé avec la méthode CAH
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Obtenir les noms des lignes ayant Cluster_CAH égal à 1
+zones_CAH <- rownames(subset(df_clusters, Cluster_CAH == 1))
+
+# Créer un dataframe avec les noms de lignes
+zones_CAH <- data.frame(Code_iso = zones_CAH)
+
+# Fusionner avec le dataframe code_pays en utilisant la colonne "Zone" comme clé
+zones_CAH_merged <- merge(zones_CAH, code_pays, by = "Code_iso")
+
+# Afficher le tableau des noms de lignes
+kbl(zones_CAH_merged, format = "html") %>%
+  kable_classic_2(full_width = F)
+
+```
+
+
+## 5.2 Kmeans
+
+L’algorithme des k-means consiste à regrouper les individus dans k classes les plus homogènes possibles.
+
+Au départ, elle place aléatoirement K centres (un pour chaque cluster). Ensuite, elle attribue chaque point au cluster dont le centre est le plus proche. Puis, elle déplace les centres pour minimiser la distance moyenne entre les points et leur centre. Elle répète ces étapes jusqu'à ce que les centres ne bougent plus beaucoup.
+
+### 5.2.1 Détermination du nombre optimal de clusters
+
+- Elbow method
+
+On va générer le graphique qui montre la somme des carrés des distances intra-clusters (WCSS) pour différents nombres de clusters (k). En d'autres termes, le WCSS mesure à quel point les points de données à l'intérieur de chaque cluster sont proches les uns des autres. Plus le WCSS est faible, plus les points au sein d'un cluster sont similaires.
+
+Le point d'inflexion sur le graphique du coude est utilisé pour déterminer le nombre optimal de clusters. Ce coude représente le point où la réduction du WCSS ralentit considérablement à mesure que vous augmentez le nombre de clusters.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Utiliser la fonction fviz_nbclust pour obtenir la visualisation du coude
+set.seed(123)
+fviz_nbclust(df, kmeans, method = "wss")+
+  labs(subtitle = "Elbow method") 
+
+```
+ 
+ La méthode du coude semble indiqué un découpage en 8 clusters.
+
+- Méthode de silhouette
+
+Nous allons confirmer avec une autre méthode de détermination: La méthode de silhouette. Elle évalue la qualité de la séparation des clusters en calculant les valeurs de silhouette pour différents nombres de clusters. La silhouette mesure à quel point chaque objet est similaire à son propre cluster par rapport aux autres clusters. Un score de silhouette élevé indique une meilleure séparation des clusters.
+ 
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+set.seed(123)
+fviz_nbclust(df, kmeans, method = "silhouette") +
+  labs(subtitle = "Silhouette method")
+```
+
+Les 2 méthodes nous indiquent un nombre optimal de 8 clusters. Voyons le nombre de pays par cluster que ce découpage nous donne.
+
+8 clusters peut paraître beaucoup.
+Nous avons essayer la méthode avec un découpage en k=5 et k=6 clusters, cela a conduit à un regroupement qui inclut la Belgique, les Pays-Bas et Hong-Kong comme pays d'intérêt. 
+Un découpage en 8 nous permet d'obtenir une liste de pays plus élaborée.
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+set.seed(123) 
+
+# Effectuer le K-means avec 8 clusters
+kmeans_result <- kmeans(df, centers = 8)
+
+# Ajouter la colonne avec le numéro de cluster 
+df_clusters$Cluster_kmean <- kmeans_result$cluster
+coord_acp_clusters$Cluster_kmean <- kmeans_result$cluster
+
+# Calculer le nombre d'individus par cluster
+nombre_individus_par_cluster <- table(df_clusters$Cluster_kmean)
+
+# Afficher le nombre d'individus par cluster
+nombre_individus_par_cluster %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+
+### 5.2.2 Indice de silhouette
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Calculer les scores de silhouette pour chaque observation
+silhouette_Kmean <- silhouette(df_clusters$Cluster_kmean, dist(df))
+
+# Calculer les moyennes de silhouette par cluster
+silhouette_means_Kmean <- aggregate(silhouette_Kmean[, "sil_width"], by = list(silhouette_Kmean[, "cluster"]), FUN = mean)
+
+# Calculer la moyenne générale de silhouette
+overall_mean_Kmean <- mean(silhouette_Kmean[, "sil_width"])
+
+# Ajouter une ligne pour la moyenne générale dans le tableau
+overall_row <- data.frame(Group.1 = "Overall", x = overall_mean_Kmean)
+silhouette_means_Kmean <- rbind(silhouette_means_Kmean, overall_row)
+
+# Renommer les colonnes du tableau
+colnames(silhouette_means_Kmean) <- c("Cluster", "Silhouette_Mean_Kmeans")
+
+# Arrondir les valeurs à 2 chiffres après la virgule
+silhouette_means_Kmean$Silhouette_Mean_Kmeans <- round(silhouette_means_Kmean$Silhouette_Mean_Kmeans, 2)
+
+# Afficher le tableau des moyennes de silhouette pour K-moyennes
+kable(silhouette_means_Kmean, format = "html") %>%
+  kable_styling(bootstrap_options = "striped")
+```
+
+
+### 5.2.3 Projection des clusters K-means et centroïdes sur les plans ACP
+
+```{r,echo=FALSE,message=FALSE}
+
+# Calculer les centroïdes de chaque cluster sur les dimensions "Dim.1", "Dim.2" et "Dim.3"
+centroids_kmean <- aggregate(coord_acp_clusters[, c("Dim.1", "Dim.2", "Dim.3")], 
+                             by = list(coord_acp_clusters$Cluster_kmean), 
+                             FUN = mean)
+
+# Renommer les colonnes du dataframe des centroïdes
+colnames(centroids_kmean) <- c("Cluster_kmean", "Dim.1", "Dim.2", "Dim.3")
+
+```
+
+- Plan (1,2)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Plan (1,2)
+factoextra::fviz_pca_var(ACP,
+                        col.var = "contrib", 
+                        gradient.cols = rainbow(3),
+                        repel = TRUE,
+                        legend.title = 'Contribution')
+
+pca12_plot <- ggplot(coord_acp_clusters, aes(x = Dim.1, y = Dim.2, color = factor(Cluster_kmean))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp_clusters)), 
+                  box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 1", y = "Dimension 2", color = "Cluster") +
+  ggtitle("Projections des clusters Kmean et centroïdes sur Plan ACP Plan Dim.1/Dim.2")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_kmean$Cluster_kmean
+pca12_plot_with_centroids <- pca12_plot +
+  geom_point(data = centroids_kmean, aes(x = Dim.1, y = Dim.2), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_kmean, aes(x = Dim.1, y = Dim.2, label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3)
+
+
+# Afficher le graphique
+print(pca12_plot_with_centroids)
+
+```
+
+Le cluster 1 lui a une stabilité politique élevé.
+
+Le cluster 3 représente des pays très peuplés qui produisent beaucoup.
+
+Le cluster 4 est composé des pays qui ont un PIB élevé et qui exportent le plus , suivi du cluster 7.
+
+
+
+- Plan (1,3)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Plan (1,3)
+factoextra::fviz_pca_var(ACP,
+                                   axes = c(1, 3),
+                                   col.var = "contrib",
+                                   gradient.cols = rainbow(3),
+                                   repel = TRUE,
+                                   legend.title = 'Contribution')
+
+pca13_plot <- ggplot(coord_acp_clusters, aes(x = Dim.1, y = Dim.3, color = factor(Cluster_kmean))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp)), box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 1 ", y = "Dimension 3", color = "Cluster") +
+  ggtitle("Projections des clusters Kmean et centroïdes sur Plan ACP Dim.1/Dim.3")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_kmean$Cluster_kmean
+pca13_plot_with_centroids <- pca13_plot +
+  geom_point(data = centroids_kmean, aes(x = Dim.1, y = Dim.3), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_kmean, aes(x = Dim.1, y = Dim.3, label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3)
+
+# Afficher le graphique
+print(pca13_plot_with_centroids)
+```
+
+Le cluster 1 lui a une stabilité politique élevé.
+
+Le cluster 2 a une dispo en poulet élevé suivi du cluster 1.
+
+Le cluster 3 a une population et production élevé.
+
+Le cluster 4 dépend beaucoup de l'importation.
+
+
+- Plan (2,3)
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Plan (2,3)
+factoextra::fviz_pca_var(ACP,
+                                   axes = c(2, 3),
+                                   col.var = "contrib",
+                                   gradient.cols = rainbow(3),
+                                   repel = TRUE,
+                                   legend.title = 'Contribution')
+
+
+pca23_plot <- ggplot(coord_acp_clusters, aes(x = Dim.2, y = Dim.3, color = factor(Cluster_kmean))) +
+  geom_point() +
+  geom_text_repel(aes(label = rownames(coord_acp)), box.padding = 0.5, segment.color = 'grey', size = 3) +
+  labs(x = "Dimension 2 ", y = "Dimension 3", color = "Cluster") +
+  ggtitle("Projections des clusters Kmean et centroïdes sur Plan ACP Dim.2/Dim.3")
+
+# Ajouter les centroïdes au graphique existant
+centroid_labels <- centroids_kmean$Cluster_kmean
+pca23_plot_with_centroids <- pca23_plot +
+  geom_point(data = centroids_kmean, aes(x = Dim.2, y = Dim.3), 
+             color = "black", shape = "x", size = 5) +
+  geom_text(data = centroids_kmean, aes(x = Dim.2, y = Dim.3, label = centroid_labels), 
+            color = "black", vjust = -0.5, hjust = -0.5, size = 3)
+
+# Afficher le graphique
+print(pca23_plot_with_centroids)
+```
+
+Le cluster 2 a une dispo en poulet élevé suivi du cluster 1.
+
+Le cluster 4 est composé de pays qui importent beaucoup, exportent beaucoup et dépendent beaucoup des importations.
+
+Le cluster 7 est composé de pays qui importent et exportent beaucoup.
+
+### 5.2.4 Caractérisation des clusters avec les variables initiales
+
+```{r,echo=FALSE,message=FALSE, warning=FALSE}
+
+# Créer une liste de variables pour lesquelles vous souhaitez générer des boxplots
+variables <- c("Population", "Stabilité_politique", "PIB", "Inflation_decimal",
+               "Production",'TAS_decimal',"Importations", 'TDI_decimal', "Exportations", 'dispo_poulet_kg_par_hab')
+
+# Fonction pour générer un graphique boxplot
+generate_boxplot <- function(variable) {
+  ggplot(df_clusters, aes(x = Cluster_kmean, y = !!sym(variable),fill = factor(Cluster_kmean))) +
+    geom_boxplot(show.legend = FALSE) +
+    labs(x = "Cluster Kmean", y = variable) +
+    ggtitle(paste("Distribution de", variable)) +
+    theme_minimal()
+}
+
+# Créer une liste pour stocker les paires de graphiques
+pair_list <- list()
+
+# Générer les paires de graphiques
+for (i in seq(1, length(variables), by = 2)) {
+  pair <- variables[i:min(i + 1, length(variables))]
+  plot1 <- generate_boxplot(pair[1])
+  plot2 <- generate_boxplot(pair[2])
+  pair_list[[length(pair_list) + 1]] <- grid.arrange(plot1, plot2, ncol = 2)
+}
+
+# Afficher les paires de graphiques sans afficher les messages de sortie
+lapply(pair_list, function(pair) {
+  suppressMessages(print(pair))
+})
+
+```
+
+
+Cluster 1: Pays les plus riches et les plus stables politiquement, faibles importtaions
+
+- Population faible
+- Stabilité politique forte
+- PIB fort
+- Inflation faible
+- Production faible
+- TAS moyen
+- Importations faibles
+- TDI moyen
+- Exportations faibles
+- Disponibilité de poulet moyenne
+
+Cluster 2: Pays les plus consommateurs mais les moins importateurs
+
+- Population faible
+- Stabilité politique forte
+- PIB moyen
+- Inflation faible
+- Production faible
+- TAS moyen
+- Importations faibles
+- TDI faible
+- Exportations faibles
+- Disponibilité de poulet élevée
+
+Cluster 3: Pays très peuplés avec un PIB faible
+
+- Population élevée
+- Stabilité politique faible
+- PIB faible
+- Inflation moyenne
+- Production élevée
+- TAS moyen
+- Importations faibles
+- TDI faible
+- Exportations faibles
+- Disponibilité de poulet faible
+
+Cluster 4: Pays qui importent beaucoup et exportent le plus, autosuffisant et dépendent le plus de l'importation
+
+- Population faible
+- Stabilité politique forte
+- PIB fort
+- Inflation faible
+- Production moyenne
+- TAS élevé
+- Importations élevées
+- TDI élevé
+- Exportations élevées
+- Disponibilité de poulet faible
+
+Cluster 5: Pays qui produisent le moins et PIB faible
+
+- Population faible
+- Stabilité politique moyenne
+- PIB faible
+- Inflation faible
+- Production faible
+- TAS faible
+- Importations faibles
+- TDI moyen
+- Exportations faibles
+- Disponibilité de poulet faible
+
+Cluster 6: Pays qui ont la plus forte inflation
+
+- Population faible
+- Stabilité politique moyenne
+- PIB faible
+- Inflation élevée
+- Production faible
+- TAS moyen
+- Importations faibles
+- TDI moyen
+- Exportations faibles
+- Disponibilité de poulet faible
+
+
+Cluster 7: Pays qui importent le plus avec PIB et stabilité politique forts
+
+- Population moyenne
+- Stabilité politique forte
+- PIB fort
+- Inflation faible
+- Production élevée
+- TAS moyen
+- Importations élevées
+- TDI moyen
+- Exportations moyennes
+- Disponibilité de poulet moyenne
+
+Cluster 8: Pays qui exportent le moins et PIB faible
+
+- Population faible
+- Stabilité politique moyenne
+- PIB faible
+- Inflation faible
+- Production faible
+- TAS moyen
+- Importations faibles
+- TDI faible
+- Exportations faibles
+- Disponibilité de poulet faible
+
+Le Cluster 7 pourrait être intéressant à considérer, car il correspond aux pays qui importent le plus. Les caractéristiques de ce cluster comprennent une population moyenne, une stabilité politique forte, un PIB élevé, une inflation faible, une production élevée et des importations élevées. Cela pourrait indiquer une forte demande de produits importés.
+
+Le cluster 4 pourrait être aussi être des pays intéressant. Pays qui importent aussi beaucoup et dépendent beaucoup de l'importation.
+
+### 5.2.5 Liste des pays ciblés avec la méthode Kmeans
+
+Le Cluster 7 est composé de:
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Obtenir les noms des lignes ayant Cluster_CAH égal à 7
+zones_kmean <- rownames(df_clusters[df_clusters$Cluster_kmean == 7, ])
+
+# Créer un dataframe avec les noms de lignes
+zones_kmean <- data.frame(Code_iso = zones_kmean)
+
+# Fusionner avec le dataframe code_pays en utilisant la colonne "Zone" comme clé
+zones_kmean_merged <- merge(zones_kmean, code_pays, by = "Code_iso")
+
+# Afficher le tableau des noms de lignes
+kbl(zones_kmean_merged, format = "html") %>%
+  kable_classic_2(full_width = F)
+
+```
+Le cluster 4 est composé de:
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Obtenir les noms des lignes ayant Cluster_CAH égal à 4
+zones_kmean2 <- rownames(df_clusters[df_clusters$Cluster_kmean == 4, ])
+
+# Créer un dataframe avec les noms de lignes
+zones_kmean2 <- data.frame(Code_iso = zones_kmean2)
+
+# Fusionner avec le dataframe code_pays en utilisant la colonne "Zone" comme clé
+zones_kmean_merged2 <- merge(zones_kmean2, code_pays, by = "Code_iso")
+
+# Afficher le tableau des noms de lignes
+kbl(zones_kmean_merged2, format = "html") %>%
+  kable_classic_2(full_width = F)
+
+```
+
+L'ensemble des pays ciblés par la méthode Kmean:
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Concaténer zones_kmean et zones_kmean2)
+zones_kmean_final <- rbind(zones_kmean_merged, zones_kmean_merged2)
+
+kbl(zones_kmean_final, format = "html") %>%
+  kable_classic_2(full_width = F)
+```
+
+## 5.3 DBScan Density
+
+Le DBSCAN est un algorithme de clustering basé sur la densité. Il regroupe les points de données qui sont proches les uns des autres dans un espace de grande densité, et marque les points isolés comme du bruit.
+
+
+### 5.3.1 Détermination du nombre optimal de eps
+
+Choisir les paramètres de l'algorithme DBSCAN : le nombre minimum de points (MinPts) requis pour former un cluster et le rayon (epsilon) autour d'un point à considérer pour la formation d'un cluster.
+
+La courbe de k-distance peut être utilisée pour déterminer un bon choix de k pour l'algorithme DBSCAN. Le bon choix de k est généralement situé à un point où la courbe montre une forte augmentation des distances (un "coude"). Cela peut indiquer le nombre de voisins à partir duquel un point commence à être plus isolé des autres points et donc représente un bon candidat pour être un point de départ pour un nouveau cluster.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+kNNdistplot(df, k=5)
+```
+
+On lance le DBscan avec eps=4.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+set.seed(123)
+
+# Exemple d'utilisation de DBSCAN avec epsilon = 5
+dbscan_result <- dbscan(coord_acp, eps = 4, minPts = 5)
+
+# Ajouter la colonne avec le numéro de cluster 
+df_clusters$Cluster_dbscan <- dbscan_result$cluster
+coord_acp_clusters$Cluster_dbscan <- dbscan_result$cluster
+
+# Utiliser la fonction table pour compter le nombre de zones dans chaque cluster
+nombre_zones_par_cluster <- table(df_clusters$Cluster_dbscan)
+
+# Afficher le nombre de zones par cluster
+nombre_zones_par_cluster %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+
+```
+
+La méthode DBScan Density nous a isolé 3 pays.
+
+```{r,echo=FALSE,message=FALSE, warning=FALSE}
+hullplot(coord_acp, dbscan_result$cluster)
+```
+
+La methode a rassemblé un cluster et a identifié 3 individus comme étant du bruit.
+
+### 5.3.2 Indice de silhouette
+
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Calculer les scores de silhouette pour chaque observation
+silhouette_dbscan <- silhouette(df_clusters$Cluster_dbscan, dist(df))
+
+# Calculer les moyennes de silhouette par cluster
+silhouette_means_dbscan <- aggregate(silhouette_dbscan[, "sil_width"], by = list(silhouette_dbscan[, "cluster"]), FUN = mean)
+
+# Calculer la moyenne générale de silhouette
+overall_mean_dbscan <- mean(silhouette_dbscan[, "sil_width"])
+
+# Ajouter une ligne pour la moyenne générale dans le tableau
+overall_row <- data.frame(Group.1 = "Overall", x = overall_mean_dbscan)
+silhouette_means_dbscan <- rbind(silhouette_means_dbscan, overall_row)
+
+# Renommer les colonnes du tableau
+colnames(silhouette_means_dbscan) <- c("Cluster", "Silhouette_Mean_dbscan")
+
+# Arrondir les valeurs à 2 chiffres après la virgule
+silhouette_means_dbscan$Silhouette_Mean_dbscan <- round(silhouette_means_dbscan$Silhouette_Mean_dbscan, 2)
+
+# Afficher le tableau des moyennes de silhouette pour K-moyennes
+kable(silhouette_means_dbscan, format = "html") %>%
+  kable_styling(bootstrap_options = "striped")
+
+```
+
+### 5.3.3 Caractérisation des clusters avec les variables initiales
+
+```{r,echo=FALSE,message=FALSE, warning=FALSE}
+
+# Créer une liste de variables pour lesquelles vous souhaitez générer des boxplots
+variables <- c("Population", "Stabilité_politique", "PIB", "Inflation_decimal",
+               "Production",'TAS_decimal',"Importations", 'TDI_decimal', "Exportations", 'dispo_poulet_kg_par_hab')
+
+# Fonction pour générer un graphique boxplot
+generate_boxplot <- function(variable) {
+  ggplot(df_clusters, aes(x = Cluster_dbscan, y = !!sym(variable),fill = factor(Cluster_dbscan))) +
+    geom_boxplot(show.legend = FALSE) +
+    labs(x = "Cluster DBScan", y = variable) +
+    ggtitle(paste("Distribution de", variable)) +
+    theme_minimal()
+}
+
+# Créer une liste pour stocker les paires de graphiques
+pair_list <- list()
+
+# Générer les paires de graphiques
+for (i in seq(1, length(variables), by = 2)) {
+  pair <- variables[i:min(i + 1, length(variables))]
+  plot1 <- generate_boxplot(pair[1])
+  plot2 <- generate_boxplot(pair[2])
+  pair_list[[length(pair_list) + 1]] <- grid.arrange(plot1, plot2, ncol = 2)
+}
+
+# Afficher les paires de graphiques sans afficher les messages de sortie
+invisible(
+  lapply(pair_list, function(pair) {
+    print(pair)
+  })
+)
+
+```
+Nous constatons que ces trois pays se caractérisent par : une population et une inflation faibles, une production moyenne et des niveaux élevés de stabilité politique, de PIB, de TAS, d'importations, de TDI et d'exportations.
+
+### 5.3.4 Liste des pays ciblés avec la méthode DBScan density
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Obtenir les noms des lignes ayant Cluster_CAH égal à 0
+zones_dbscan <- rownames(df_clusters[df_clusters$Cluster_dbscan == 0, ])
+
+# Créer un dataframe avec les noms de lignes
+zones_dbscan <- data.frame(Code_iso = zones_dbscan)
+
+# Fusionner avec le dataframe code_pays en utilisant la colonne "Zone" comme clé
+zones_dbscan_merged <- merge(zones_dbscan, code_pays, by = "Code_iso")
+
+# Afficher le tableau des noms de lignes
+kbl(zones_dbscan_merged, format = "html") %>%
+  kable_classic_2(full_width = F)
+
+```
+
+On relance l'analyse après avoir supprimé ces 3 pays de notre liste afin d'essayer d'identifier d'autres clusters.
+
+### 5.3.5 Relance nouveau DBScan sans les 3 premiers pays ciblés
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Supprimer les lignes avec les noms de zones spécifiés
+zones_to_remove <- c("BEL", "HKG", "NLD")
+df_modifié<- df[!(rownames(df) %in% zones_to_remove), ]
+coord_acp_modifié<- coord_acp[!(rownames(coord_acp) %in% zones_to_remove), ]
+df_clusters_modifié <- df_clusters[!(rownames(df_clusters) %in% zones_to_remove), ]
+coord_acp_clusters_modifié <- coord_acp_clusters[!(rownames(coord_acp_clusters) %in% zones_to_remove), ]
+df_modifié<- df[!(rownames(df) %in% zones_to_remove), ]
+
+kNNdistplot(df_modifié, k=5)
+```
+
+On choisit eps=3.5
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# DBSCAN avec epsilon = 3
+dbscan_result2 <- dbscan(df_modifié, eps = 3.5, minPts = 5)
+
+# Ajouter la colonne avec le numéro de cluster 
+df_clusters_modifié$Cluster_dbscan <- dbscan_result2$cluster
+coord_acp_clusters_modifié$Cluster_dbscan <- dbscan_result2$cluster
+
+# Utiliser la fonction table pour compter le nombre de zones dans chaque cluster
+nombre_zones_par_cluster <- table(df_clusters_modifié$Cluster_dbscan)
+
+# Afficher le nombre de zones par cluster
+nombre_zones_par_cluster %>%
+  kbl() %>%
+  kable_classic_2(full_width = F)
+```
+La méthode ne nous isole plus aucun pays.
+
+## 5.4 Analyse Comparative des Résultats des 3 Méthodes de Clustering
+
+### 5.4.1 Comparaison des Pays sélectionnés par Chaque Méthode de Clustering 
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Fusionner les dataframes par la colonne "Pays" en conservant tous les pays
+final_df <- full_join(zones_CAH_merged, zones_kmean_final, by = "Zone") %>%
+  full_join(zones_dbscan_merged, by = "Zone") %>%
+  select(Zone, Code_iso.x, Code_iso.y, Code_iso) %>%
+  rename(CAH = Code_iso.x, Kmeans = Code_iso.y, DBScan = Code_iso)
+
+# Remplacer les valeurs NA par une case vide dans le dataframe
+final_df[is.na(final_df)] <- ""
+
+# Afficher le dataframe avec une mise en forme améliorée et valeurs NA comme cases vides
+styled_table <- kable(final_df, format = "html", escape = FALSE) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE)
+
+styled_table
+```
+Les trois méthodes ont identifié des pays comme la Belgique, les Pays-Bas et Hong-Kong comme des cibles potentielles pour l'exportation de poulets.
+
+
+### 5.4.2 Comparaison des Moyennes des Indices de Silhouette pour les Différentes Méthodes de Clustering
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Fusionner les tableaux par Cluster avec une fusion externe
+silhouette_means_merged <- merge(silhouette_means_CAH, silhouette_means_Kmean, by = "Cluster", suffixes = c("_CAH", "_Kmean"), all = TRUE)
+silhouette_means_merged <- merge(silhouette_means_merged, silhouette_means_dbscan, by = "Cluster", all = TRUE)
+
+# Renommer les colonnes pour plus de clarté
+colnames(silhouette_means_merged) <- c("Cluster", "Silhouette_Mean_CAH", "Silhouette_Mean_Kmeans", "Silhouette_Mean_DBScan")
+
+# Afficher le tableau fusionné
+kable(silhouette_means_merged, format = "html") %>%
+  kable_styling(full_width = FALSE)
+```
+L'indice de silhouette n'est pas une mesure adaptée pour DBSCAN car il ne crée pas nécessairement des partitions cohérentes dans l'espace des données comme le font K-Means ou la classification ascendante hiérarchique (CAH). Au lieu de cela, DBSCAN identifie les régions de densité élevée et sépare les zones de faible densité, ce qui peut donner lieu à des groupes de formes et de tailles différentes, et certaines données peuvent être considérées comme du bruit.
+
+On peut voir que le clustering DBScan a le silhouette score le plus élevé (0.61), suivi par le clustering KMeans (0.25) et le clustering CAH (0.20). 
+Malgré le score de silhouette plus élevé pour DBScan, nous choississons le clustering Kmeans qui a potentiellement mieux séparé les clusters par rapport aux autres méthodes.
+
+
+# 6 Liste finale des pays à étudier
+
+
+En complément des pays sélectionnés, d'autres pays pourraient également avoir de la pertinence pour votre marché comme La Chine continentale qui a été exclue en raison de l'absence de données politiques.
+
+Les pays tels que l’Allemagne, Belgique, Pays-Bas et le Royaume-Uni offrent des avantages logistiques, tels que des liaisons de transport efficaces ou des frontières terrestres partagées, qui pourraient réduire les coûts de transport et les délais de livraison.
+
+Vous trouverez ci-dessous un tableau répertoriant tous ces pays avec leurs données initiales ainsi que leur distance par rapport à Paris en km et les moyens de transport :
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+
+# Sélectionner uniquement les colonnes spécifiées
+selected_columns <- c(
+  "Zone",
+  "Population",
+  "Inflation",
+  "Stabilité_politique",
+  "PIB",
+  "Production",
+  "Importations",
+  "Exportations",
+  "TAS",
+  "TDI",
+  "dispo_poulet_kg_par_hab"
+)
+
+sélection_df <- merged_df4[, selected_columns]
+
+# Pays que vous souhaitez conserver dans le filtrage
+countries_to_keep <- c(
+  "Chine, continentale",
+  "Belgique",
+  "Pays-Bas",
+  "Chine - RAS de Hong-Kong",
+  "Allemagne",
+  "Royaume-Uni de Grande-Bretagne et d'Irlande du Nord",
+  "Japon",
+  "Mexique",
+  "Arabie saoudite",
+  "Afrique du Sud",
+  "Émirats arabes unis"
+)
+
+# Filtrer le data frame pour conserver uniquement les pays spécifiés
+sélection_df <- subset(sélection_df, Zone %in% countries_to_keep)
+
+
+# Créer un dataframe de distances pour les pays spécifiés
+distances_df <- data.frame(
+  Zone = c(
+    "Chine, continentale",
+    "Belgique",
+    "Pays-Bas",
+    "Chine - RAS de Hong-Kong",
+    "Allemagne",
+    "Royaume-Uni de Grande-Bretagne et d'Irlande du Nord",
+    "Japon",
+    "Mexique",
+    "Arabie saoudite",
+    "Afrique du Sud",
+    "Émirats arabes unis"
+  ),
+  Distance_Paris_capitale = c(8000, 320, 500, 9600, 1050, 340, 9700, 9500, 4500, 9000, 5400)
+)
+
+# Fusionner les dataframes par la colonne "Zone"
+sélection_df <- merge(sélection_df, distances_df, by = "Zone", all.x = TRUE)
+
+
+# Afficher le data frame filtré
+kable(sélection_df, format = "html", table.attr = "class='table'")
+
+```
+
+
+L'analyse a permis d'identifier plusieurs pays cibles potentiels pour l'exportation de poulets. 
+La décision finale pourrait reposer sur d'autres paramètres propres à l'entreprise, tels que la compétitivité sur les marchés locaux et internationaux, les coûts liés à l'exportation...
+
+L'entreprise "Poulet Mondial" peut maintenant utiliser ces informations pour prendre des décisions éclairées sur sa stratégie d'exportation.
